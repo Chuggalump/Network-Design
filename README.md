@@ -50,7 +50,7 @@ Step  5: Open RDT2.2_UDPServer.py and start the program on the server's computer
 
 Step 6: Once the file is transfered, open the PyCharm folder that contains the server code and open the transfered file.
 
-Step 7: If you want to rerun the program, run both programs again repeating the end of step 4, then step 5 and step 6.
+Step 7: If you want to rerun the program, run both programs again repeating the end of step 4 and on.
 __________________________________________________________________________________________________
 
 References:
