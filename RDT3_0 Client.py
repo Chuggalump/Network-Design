@@ -11,6 +11,7 @@ import array
 import sys
 import random
 import time
+import select
 
 
 # Define server name (or IP) and Port#
@@ -22,6 +23,7 @@ serverPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
 clientSocket = socket(AF_INET, SOCK_DGRAM)
+clientSocket.settimeout(0.05)
 
 # *********************** Send client a question to know when files are ready to be sent over
 message = ('Enter File Name to transfer file!')
@@ -51,11 +53,14 @@ image = open(FileName, 'rb')
 packet_size = 1024
 packetIndex = 0
 print("packet size is: ", packet_size)
-SeqNum = 0b0
+SeqNum0 = 0b0
+SeqNum1 = 0b1
+sendPacket = bytearray()
+initialPacket = bytearray()
 
-test_Num = 0
-timeout_trig = 0
 ack_error = 60
+data_loss_rate = 0
+
 
 # Define a make packet function that outputs a packet and an index number
 def make_packet(csize, file_name, packet_index):
@@ -85,12 +90,13 @@ def convert_bytes(data):
 
 def Timeout(test_Num):
     # Select a random int btwn 0 and 100
+    random.seed()
     randNum = random.randrange(0, 100)
     # if randNum is less than the specified error rate, flip the bit
     if randNum < test_Num:
-         test_Num = 0
+         test_Num = 1
     elif randNum > test_Num:
-        test_Num = 1
+        test_Num = 0
     return test_Num
 
 
@@ -106,125 +112,122 @@ def ack_corrupt(sequence):
     return sequence
 
 
-def drop_ack(drop_ACK):
-    # Select a random int btwn 0 and 100
-    randdrop = random.randrange(0, 100)
-    if randdrop < drop_ACK:
-        drop_ACK = 0
-        pass
-    elif randdrop >= drop_ACK:
-        drop_ACK = 1
-    return drop_ACK
-
+state = 0
 
 while 1:
-    sendPacket = bytearray()
-    # sendPacket = sendPacket.to_bytes(2, byteorder='little')
-    # create a packet and save it to the initialPacket variable, along with an index# to track it
-    initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
-    # print("initialPacket:", initialPacket)
-    # print("initialPacket length:", len(initialPacket))
+    if state == 0:
+        sendPacket = bytearray()
+        # sendPacket = sendPacket.to_bytes(2, byteorder='little')
+        # create a packet and save it to the initialPacket variable, along with an index# to track it
+        initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
+        # print("initialPacket:", initialPacket)
+        # print("initialPacket length:", len(initialPacket))
 
-    checksum = make_checksum(initialPacket)
-    bitsum = checksum.to_bytes(2, byteorder='little')
+        checksum = make_checksum(initialPacket)
+        bitsum = checksum.to_bytes(2, byteorder='little')
 
-    SeqNum = convert_bytes(SeqNum)
-    sendPacket.append(SeqNum)
-    for i in bitsum:
-        sendPacket.append(i)
-    for j in initialPacket:
-        sendPacket.append(j)
+        sendPacket.append(SeqNum0)
+        for i in bitsum:
+            sendPacket.append(i)
+        for j in initialPacket:
+            sendPacket.append(j)
 
-    if len(initialPacket) < 1024:
+        # Implement a data loss
+        if Timeout(data_loss_rate) == 0:
+            clientSocket.sendto(sendPacket, (serverName, serverPort))
+            print("Packet #", packetIndex, "sent")
+            state = 1
+        elif Timeout(data_loss_rate) == 1:
+            print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            state = 0
 
-        clientSocket.sendto(sendPacket, (serverName, serverPort))
-        print("Packet #", packetIndex, "sent")
-
-        start = time.time()
-
-        while 1:
-            Timeout = Timeout(test_Num)
-            if Timeout == 1:
-                pass
-            elif Timeout == 0:
-                time.sleep(0.07)
-
-            if time.time() <= (start + 0.05):
-                end = start
-                print('Packet sent without timeout................')
-                # wait for server to respond with the sequence number (ACK)
-                NewSeqNum, trashData = clientSocket.recvfrom(2048)
-            elif time.time() > (start + 0.05):
-                end = start
-                print('Packet was timed out!!!!!!!!!!!!!!!!!!!!!!!!')
-                # wait for server to respond with the sequence number (ACK)
-                NewSeqNum, trashData = clientSocket.recvfrom(2048)
+    elif state == 1:
+        try:
+            startTime = time.time()
+            ackPacket, trashdata = clientSocket.recvfrom(2048)
+            NewSeqNum = ackPacket[:1]
+            serverChecksum = ackPacket[1:]
+            recvTime = time.time()
+            print("ACK Received")
 
             NewSeqNum = convert_bytes(NewSeqNum)
-            SeqNum = convert_bytes(SeqNum)
 
             print("NewSeqNum:", NewSeqNum)
             NewSeqNum = ack_corrupt(NewSeqNum)
             print("NewSeqNum Post Error:", NewSeqNum)
-            # if the same sequence number is received, we have the wrong ACK
-            if NewSeqNum == SeqNum:
+            # if a different sequence number is received, we have the wrong ACK
+            if NewSeqNum != SeqNum0 or serverChecksum != bitsum:
                 # Resend the packet
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
-            # if a different sequence number is received, we have the right ACK
-            elif NewSeqNum != SeqNum:
-                # Since it's the last packet, close the file and break
-                SeqNum = NewSeqNum
-                image.close()
-                break
-            else:
-                # do nothing
-                pass
-        break
-    # If the packet is 1024 bytes in length, send the packet to the server and print a confirmation message
-    elif len(initialPacket) == 1024:
-        clientSocket.sendto(sendPacket, (serverName, serverPort))
-        print("Packet #", packetIndex, "sent")
+                state = 1
+            # if the same sequence number is received, we have the right ACK
+            elif NewSeqNum == SeqNum0 and serverChecksum == bitsum:
+                # set next state
+                state = 2
+                if len(initialPacket) < 1024:
+                    image.close()
+                    break
+        except timeout:
+            print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            clientSocket.sendto(sendPacket, (serverName, serverPort))
+            print("Packet #", packetIndex, "resent")
+            state = 1
 
-        start = time.time()
+    elif state == 2:
+        sendPacket = bytearray()
+        # sendPacket = sendPacket.to_bytes(2, byteorder='little')
+        # create a packet and save it to the initialPacket variable, along with an index# to track it
+        initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
+        # print("initialPacket:", initialPacket)
+        # print("initialPacket length:", len(initialPacket))
 
-        while 1:
-            Timeout2 = Timeout(test_Num)
-            if Timeout2 == 1:
-                pass
-            elif Timeout2 == 0:
-                time.sleep(0.07)
+        checksum = make_checksum(initialPacket)
+        bitsum = checksum.to_bytes(2, byteorder='little')
 
-            if time.time() <= (start + 0.05):
-                end = start
-                print('Packet sent without timeout................')
-                # wait for server to respond with the sequence number (ACK)
-                NewSeqNum, trashData = clientSocket.recvfrom(2048)
-            elif time.time() > (start + 0.05):
-                end = start
-                print('Packet was timed out!!!!!!!!!!!!!!!!!!!!!!!!')
-                # wait for server to respond with the sequence number (ACK)
-                NewSeqNum, trashData = clientSocket.recvfrom(2048)
+        sendPacket.append(SeqNum1)
+        for i in bitsum:
+            sendPacket.append(i)
+        for j in initialPacket:
+            sendPacket.append(j)
+
+        # Implement a data loss
+        if Timeout(data_loss_rate) == 0:
+            clientSocket.sendto(sendPacket, (serverName, serverPort))
+            print("Packet #", packetIndex, "sent")
+            state = 3
+        elif Timeout(data_loss_rate) == 1:
+            print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            state = 2
+    elif state == 3:
+        try:
+            startTime = time.time()
+            ackPacket, trashdata = clientSocket.recvfrom(2048)
+            NewSeqNum = ackPacket[:1]
+            serverChecksum = ackPacket[1:]
+            recvTime = time.time()
+            print("ACK Received")
 
             NewSeqNum = convert_bytes(NewSeqNum)
-            SeqNum = convert_bytes(SeqNum)
 
             print("NewSeqNum:", NewSeqNum)
             NewSeqNum = ack_corrupt(NewSeqNum)
             print("NewSeqNum Post Error:", NewSeqNum)
-            print("Old SeqNum:", SeqNum)
-            if NewSeqNum == SeqNum:
-                # if the same sequence number is received, resend the packet
+            # if a different sequence number is received, we have the wrong ACK
+            if NewSeqNum != SeqNum1 or serverChecksum != bitsum:
+                # Resend the packet
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
-            elif NewSeqNum != SeqNum:
-                # if a different sequence number is received, move on to the next packet
-                SeqNum = NewSeqNum
-                break
-            else:
-                # do nothing
-                pass
-    # If the initial packet length is 0, the last packet was exactly 1024 bits. Close the image and break the loop
-    elif len(initialPacket) == 0:
-        image.close()
-        break
+                state = 3
+            # if the same sequence number is received, we have the right ACK
+            elif NewSeqNum == SeqNum1 and serverChecksum == bitsum:
+                # set next state
+                state = 0
+                if len(initialPacket) < 1024:
+                    image.close()
+                    break
+        except timeout:
+            print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            clientSocket.sendto(sendPacket, (serverName, serverPort))
+            print("Packet #", packetIndex, "resent")
+            state = 3
