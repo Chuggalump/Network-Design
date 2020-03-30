@@ -7,6 +7,7 @@
 # Enable the creation of sockets
 from socket import *
 import array
+import sys
 import random
 import time
 
@@ -48,6 +49,8 @@ OldSeqNum = b'\x00'
 SeqNum = 0
 file = open(FileName, 'wb')
 print("Ready to download file ...")
+ackPacket = bytearray()
+recvPacket = bytearray()
 
 dat_error = 0
 ack_loss_rate = 0
@@ -107,74 +110,108 @@ def data_error(data):
         return data
 
 
+state = 0
+
 while 1:
-    if x is True:
-        break
-    recvPacket = bytearray()
-    recvPacket, clientAddress = serverSocket.recvfrom(2048)
-    # When the packet arrives at the server's socket, it gets stored in the variable message.
-    # The message set up is like in the Client code. But the UDPServer will make use of this since
-    # it includes the return address and information from the client and now server knows where it should reply to
+    if state == 0:
+        ackPacket = bytearray()
+        recvPacket, clientAddress = serverSocket.recvfrom(2048)
+        # When the packet arrives at the server's socket, it gets stored in the variable message.
+        # The message set up is like in the Client code. But the UDPServer will make use of this since
+        # it includes the return address and information from the client and now server knows where it should reply to
 
-    SeqNum = (recvPacket[:1])
-    clientChecksum = recvPacket[1:3]
-    dataPacket = recvPacket[3:]
+        SeqNum = recvPacket[:1]
+        SeqNum = convert_bytes(SeqNum)
+        clientChecksum = recvPacket[1:3]
+        dataPacket = recvPacket[3:]
 
-    # Simulate possible data corruption
-    dataPacket = data_error(dataPacket)
-    # Make a checksum out of received data (post corruption simulation)
-    serverChecksum = make_checksum(dataPacket)
-    # Convert Server-side checksum into bytes
-    sbitsum = serverChecksum.to_bytes(2, byteorder='little')
+        # Simulate possible data corruption
+        dataPacket = data_error(dataPacket)
+        # Make a checksum out of received data (post corruption simulation)
+        serverChecksum = make_checksum(dataPacket)
+        # Convert Server-side checksum into bytes
+        sbitsum = serverChecksum.to_bytes(2, byteorder='little')
 
-    while True:
         # If checksums different, there was data error
-        if sbitsum != clientChecksum:
+        if sbitsum != clientChecksum or SeqNum != 0:
             # Resend the same sequence number back to the Client. This signals a NACK
-            serverSocket.sendto(SeqNum, clientAddress)
+            ackPacket.append(SeqNum)
+            for i in clientChecksum:
+                ackPacket.append(i)
+            serverSocket.sendto(ackPacket, clientAddress)
             print("Nack Sent, indexNumber", indexNumber)
-            break
+            state = 0
+        elif sbitsum == clientChecksum and SeqNum == 0:
+            ackPacket.append(SeqNum)
+            for i in sbitsum:
+                ackPacket.append(i)
+            serverSocket.sendto(ackPacket, clientAddress)
+            print("ACK Sent, indexNumber", indexNumber)
 
-        if SeqNum != OldSeqNum:
+            if indexNumber > 0:
+                file.write(writeDataPacket)
+                print("Packet #", indexNumber, "Downloaded")
+
+            state = 1
             writeDataPacket = dataPacket
-            if SeqNum == b'\x00':
-                OldSeqNum = b'\x00'
-            elif SeqNum == b'\x01':
-                OldSeqNum = b'\x01'
-            if Timeout(ack_loss_rate) == 0:
-                serverSocket.sendto(SeqNum, clientAddress)
-                print("ACK sent")
-            elif Timeout(ack_loss_rate) == 1:
-                print("ACK lost")
-            break
-        elif SeqNum == OldSeqNum and indexNumber > 0:
-            file.write(writeDataPacket)
-            print("Packet #", indexNumber, "Downloaded")
+            indexNumber += 1
 
-        # Update the old Sequence Number
-        if SeqNum == b'\x00':
-            OldSeqNum = b'\x00'
-        elif SeqNum == b'\x01':
-            OldSeqNum = b'\x01'
+            if len(dataPacket) < 1024:
+                file.write(dataPacket)
+                print("Packet #", indexNumber, "Downloaded")
+                # Close the file
+                file.close()
+                break
 
-        # Send the Ack back to Client
-        if Timeout(ack_loss_rate) == 0:
-            serverSocket.sendto(SeqNum, clientAddress)
-            print("ACK sent")
-        elif Timeout(ack_loss_rate) == 1:
-            print("ACK lost")
-        # Write the contents of the packet to the file variable
-        #file.write(dataPacket)
-        writeDataPacket = dataPacket
+    if state == 1:
+        ackPacket = bytearray()
+        recvPacket, clientAddress = serverSocket.recvfrom(2048)
+        # When the packet arrives at the server's socket, it gets stored in the variable message.
+        # The message set up is like in the Client code. But the UDPServer will make use of this since
+        # it includes the return address and information from the client and now server knows where it should reply to
 
-        indexNumber += 1
-        if len(dataPacket) < 1024:
-            file.write(dataPacket)
-            print("Packet #", indexNumber, "Downloaded")
-            x = True
-            # Close the file
-            file.close()
-        break
+        SeqNum = recvPacket[:1]
+        SeqNum = convert_bytes(SeqNum)
+        clientChecksum = recvPacket[1:3]
+        dataPacket = recvPacket[3:]
+
+        # Simulate possible data corruption
+        dataPacket = data_error(dataPacket)
+        # Make a checksum out of received data (post corruption simulation)
+        serverChecksum = make_checksum(dataPacket)
+        # Convert Server-side checksum into bytes
+        sbitsum = serverChecksum.to_bytes(2, byteorder='little')
+
+        # If checksums different, there was data error
+        if sbitsum != clientChecksum or SeqNum != 1:
+            # Resend the same sequence number back to the Client. This signals a NACK
+            ackPacket.append(SeqNum)
+            for i in clientChecksum:
+                ackPacket.append(i)
+            serverSocket.sendto(ackPacket, clientAddress)
+            print("Nack Sent, indexNumber", indexNumber)
+            state = 1
+        elif sbitsum == clientChecksum and SeqNum == 1:
+            ackPacket.append(SeqNum)
+            for i in sbitsum:
+                ackPacket.append(i)
+            serverSocket.sendto(ackPacket, clientAddress)
+            print("ACK Sent, indexNumber", indexNumber)
+
+            if indexNumber > 0:
+                file.write(writeDataPacket)
+                print("Packet #", indexNumber, "Downloaded")
+
+            state = 0
+            writeDataPacket = dataPacket
+            indexNumber += 1
+
+            if len(dataPacket) < 1024:
+                file.write(dataPacket)
+                print("Packet #", indexNumber, "Downloaded")
+                # Close the file
+                file.close()
+                break
 
 end_time = start_time
 print("Total time for completion was %s" % (time.time() - start_time))
