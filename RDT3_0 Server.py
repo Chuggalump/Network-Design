@@ -114,12 +114,12 @@ state = 0
 
 while 1:
     if state == 0:
+        # State: Wait for 0 from below
         ackPacket = bytearray()
+        # Wait for the packet to come from the client
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
-        # When the packet arrives at the server's socket, it gets stored in the variable message.
-        # The message set up is like in the Client code. But the UDPServer will make use of this since
-        # it includes the return address and information from the client and now server knows where it should reply to
 
+        # Parse data
         SeqNum = recvPacket[:1]
         SeqNum = convert_bytes(SeqNum)
         clientChecksum = recvPacket[1:3]
@@ -132,45 +132,59 @@ while 1:
         # Convert Server-side checksum into bytes
         sbitsum = serverChecksum.to_bytes(2, byteorder='little')
 
-        # If checksums different, there was data error
+        # If checksums different, there was data error, if SeqNum is 1 then there's ACK error
         if sbitsum != clientChecksum or SeqNum != 0:
-            # Resend the same sequence number back to the Client. This signals a NACK
+            # Resend the same sequence number and checksum back to the Client. This signals a NACK
             ackPacket.append(1)
             for i in sbitsum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
+            # Ensure state doesn't change so that it keeps looking for the proper packet
             state = 0
+        # If checksums the same and SeqNum = 0, everything is right with the world
         elif sbitsum == clientChecksum and SeqNum == 0:
+            # Append the ACK to the packet
             ackPacket.append(0)
             for i in sbitsum:
                 ackPacket.append(i)
-            if Timeout(ack_loss_rate) == 0:
+            # Implement random ACK Packet loss
+            ackTimer = Timeout(ack_loss_rate)
+            if ackTimer == 0:
+                # If ackTimer = 0, ACK packet isn't lost
                 serverSocket.sendto(ackPacket, clientAddress)
                 if indexNumber > 0:
+                    # Write the previous packet received to the file
                     file.write(writeDataPacket)
                     print("Packet #", indexNumber, "Downloaded")
 
+                # Set next state
                 state = 1
+                # Update the variable that holds the previous data with current data (we know this packet is good)
                 writeDataPacket = dataPacket
+                # Increment indexNumber
                 indexNumber += 1
 
+                # If last packet
                 if len(dataPacket) < 1024:
+                    # Write the current data to the file
                     file.write(dataPacket)
                     print("Packet #", indexNumber, "Downloaded")
                     # Close the file
                     file.close()
+                    # Exit state machine
                     break
-            elif Timeout(ack_loss_rate) == 1:
+            elif ackTimer == 1:
+                # If ackTimer = 1, packet is "lost". Simulate by not sending the ACK back to the client
                 print("ACK lost")
                 state = 0
 
     if state == 1:
+        # State: Wait for 1 from below
         ackPacket = bytearray()
+        # Wait for the packet to come from the client
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
-        # When the packet arrives at the server's socket, it gets stored in the variable message.
-        # The message set up is like in the Client code. But the UDPServer will make use of this since
-        # it includes the return address and information from the client and now server knows where it should reply to
 
+        # Parse data
         SeqNum = recvPacket[:1]
         SeqNum = convert_bytes(SeqNum)
         clientChecksum = recvPacket[1:3]
@@ -190,27 +204,46 @@ while 1:
             for i in clientChecksum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
+            # Ensure state doesn't change so that it keeps looking for the proper packet
             state = 1
+        # If checksums the same and SeqNum = 0, everything is right with the world
         elif sbitsum == clientChecksum and SeqNum == 1:
+            # Append the ACK to the packet
             ackPacket.append(1)
             for i in sbitsum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
 
-            if indexNumber > 0:
-                file.write(writeDataPacket)
-                print("Packet #", indexNumber, "Downloaded")
+            # Implement random ACK Packet loss
+            ackTimer = Timeout(ack_loss_rate)
+            if ackTimer == 0:
+                # If ackTimer = 0, ACK packet isn't lost
+                serverSocket.sendto(ackPacket, clientAddress)
+                if indexNumber > 0:
+                    # Write the previous packet received to the file
+                    file.write(writeDataPacket)
+                    print("Packet #", indexNumber, "Downloaded")
 
-            state = 0
-            writeDataPacket = dataPacket
-            indexNumber += 1
+                # Set next state
+                state = 0
+                # Update the variable that holds the previous data with current data (we know this packet is good)
+                writeDataPacket = dataPacket
+                # Increment indexNumber
+                indexNumber += 1
 
-            if len(dataPacket) < 1024:
-                file.write(dataPacket)
-                print("Packet #", indexNumber, "Downloaded")
-                # Close the file
-                file.close()
-                break
+                # If last packet
+                if len(dataPacket) < 1024:
+                    # Write the current data to the file
+                    file.write(dataPacket)
+                    print("Packet #", indexNumber, "Downloaded")
+                    # Close the file
+                    file.close()
+                    # Exit state machine
+                    break
+            elif ackTimer == 1:
+                # If ackTimer = 1, packet is "lost". Simulate by not sending the ACK back to the client
+                print("ACK lost")
+                state = 1
 
 end_time = start_time
 print("Total time for completion was %s" % (time.time() - start_time))
