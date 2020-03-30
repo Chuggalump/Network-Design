@@ -22,6 +22,7 @@ serverSocket.bind(("", serverPort))
 # UDPServer then enters a loop to receive packets indefinitely from the clients and process the packets from clients
 # In the loop, the server waits for packets to arrive
 
+
 # ************** Receive starter message that tells client when server is accepting file transfer
 message, clientAddress = serverSocket.recvfrom(2048)
 # Receive packet from client just to have the return info to reply to the client
@@ -43,12 +44,13 @@ start_time = time.time()
 x = False
 indexNumber = 0
 writeDataPacket = 0
-OldSeqNum = b'\x01'
+OldSeqNum = b'\x00'
 SeqNum = 0
 file = open(FileName, 'wb')
 print("Ready to download file ...")
 
 dat_error = 0
+ack_loss_rate = 0
 
 
 def make_checksum(packet):
@@ -68,6 +70,19 @@ def convert_bytes(data):
     elif data == b'\x01\x00' or data == b'\x01' or data == b'\x00\x01' or data == 1:
         data = 0b1
     return data
+
+
+def Timeout(test_Num):
+    # Select a random int btwn 0 and 100
+    randNum = random.randrange(0, 100)
+    # if randNum is less than the specified error rate, flip the bit
+    if randNum < test_Num:
+        # indicates loss
+         test_Num = 1
+    elif randNum > test_Num:
+        # indicates no loss
+        test_Num = 0
+    return test_Num
 
 
 def data_error(data):
@@ -120,28 +135,34 @@ while 1:
             print("Nack Sent, indexNumber", indexNumber)
             break
 
-        if SeqNum == OldSeqNum:
+        if SeqNum != OldSeqNum:
             writeDataPacket = dataPacket
             if SeqNum == b'\x00':
-                SeqNum = b'\x01'
+                OldSeqNum = b'\x00'
             elif SeqNum == b'\x01':
-                SeqNum = b'\x00'
-            serverSocket.sendto(SeqNum, clientAddress)
+                OldSeqNum = b'\x01'
+            if Timeout(ack_loss_rate) == 0:
+                serverSocket.sendto(SeqNum, clientAddress)
+                print("ACK sent")
+            elif Timeout(ack_loss_rate) == 1:
+                print("ACK lost")
             break
-        elif SeqNum != OldSeqNum and indexNumber > 0:
+        elif SeqNum == OldSeqNum and indexNumber > 0:
             file.write(writeDataPacket)
             print("Packet #", indexNumber, "Downloaded")
 
-        # Update the Sequence Number
+        # Update the old Sequence Number
         if SeqNum == b'\x00':
-            SeqNum = b'\x01'
             OldSeqNum = b'\x00'
         elif SeqNum == b'\x01':
-            SeqNum = b'\x00'
             OldSeqNum = b'\x01'
 
         # Send the Ack back to Client
-        serverSocket.sendto(SeqNum, clientAddress)
+        if Timeout(ack_loss_rate) == 0:
+            serverSocket.sendto(SeqNum, clientAddress)
+            print("ACK sent")
+        elif Timeout(ack_loss_rate) == 1:
+            print("ACK lost")
         # Write the contents of the packet to the file variable
         #file.write(dataPacket)
         writeDataPacket = dataPacket
