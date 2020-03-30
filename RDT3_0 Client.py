@@ -58,7 +58,7 @@ SeqNum1 = 0b1
 sendPacket = bytearray()
 initialPacket = bytearray()
 
-ack_error = 60
+ack_error = 0
 data_loss_rate = 0
 
 
@@ -117,11 +117,8 @@ state = 0
 while 1:
     if state == 0:
         sendPacket = bytearray()
-        # sendPacket = sendPacket.to_bytes(2, byteorder='little')
         # create a packet and save it to the initialPacket variable, along with an index# to track it
         initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
-        # print("initialPacket:", initialPacket)
-        # print("initialPacket length:", len(initialPacket))
 
         checksum = make_checksum(initialPacket)
         bitsum = checksum.to_bytes(2, byteorder='little')
@@ -132,14 +129,15 @@ while 1:
         for j in initialPacket:
             sendPacket.append(j)
 
+        timeout1 = Timeout(data_loss_rate)
         # Implement a data loss
-        if Timeout(data_loss_rate) == 0:
+        if timeout1 == 0:
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
             state = 1
-        elif Timeout(data_loss_rate) == 1:
+        elif timeout1 == 1:
             print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            state = 0
+            state = 1
 
     elif state == 1:
         try:
@@ -148,16 +146,16 @@ while 1:
             NewSeqNum = ackPacket[:1]
             serverChecksum = ackPacket[1:]
             recvTime = time.time()
-            print("ACK Received")
 
             NewSeqNum = convert_bytes(NewSeqNum)
 
-            print("NewSeqNum:", NewSeqNum)
             NewSeqNum = ack_corrupt(NewSeqNum)
-            print("NewSeqNum Post Error:", NewSeqNum)
+
             # if a different sequence number is received, we have the wrong ACK
             if NewSeqNum != SeqNum0 or serverChecksum != bitsum:
                 # Resend the packet
+                remain = 0.05 - (recvTime - startTime)
+                time.sleep(remain)
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
                 state = 1
@@ -176,11 +174,8 @@ while 1:
 
     elif state == 2:
         sendPacket = bytearray()
-        # sendPacket = sendPacket.to_bytes(2, byteorder='little')
         # create a packet and save it to the initialPacket variable, along with an index# to track it
         initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
-        # print("initialPacket:", initialPacket)
-        # print("initialPacket length:", len(initialPacket))
 
         checksum = make_checksum(initialPacket)
         bitsum = checksum.to_bytes(2, byteorder='little')
@@ -191,14 +186,16 @@ while 1:
         for j in initialPacket:
             sendPacket.append(j)
 
+        timeout1 = Timeout(data_loss_rate)
         # Implement a data loss
-        if Timeout(data_loss_rate) == 0:
+        if timeout1 == 0:
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
             state = 3
-        elif Timeout(data_loss_rate) == 1:
+        elif timeout1 == 1:
             print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            state = 2
+            state = 3
+
     elif state == 3:
         try:
             startTime = time.time()
@@ -206,16 +203,16 @@ while 1:
             NewSeqNum = ackPacket[:1]
             serverChecksum = ackPacket[1:]
             recvTime = time.time()
-            print("ACK Received")
 
             NewSeqNum = convert_bytes(NewSeqNum)
 
-            print("NewSeqNum:", NewSeqNum)
             NewSeqNum = ack_corrupt(NewSeqNum)
-            print("NewSeqNum Post Error:", NewSeqNum)
+
             # if a different sequence number is received, we have the wrong ACK
             if NewSeqNum != SeqNum1 or serverChecksum != bitsum:
                 # Resend the packet
+                remain = 0.05 - (recvTime - startTime)
+                time.sleep(remain)
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
                 state = 3
