@@ -147,6 +147,7 @@ while 1:
             ackPacket.append(0)
             for i in sbitsum:
                 ackPacket.append(i)
+
             # Implement random ACK Packet loss
             ackTimer = Timeout(ack_loss_rate)
             if ackTimer == 0:
@@ -212,7 +213,6 @@ while 1:
             ackPacket.append(1)
             for i in sbitsum:
                 ackPacket.append(i)
-            serverSocket.sendto(ackPacket, clientAddress)
 
             # Implement random ACK Packet loss
             ackTimer = Timeout(ack_loss_rate)
