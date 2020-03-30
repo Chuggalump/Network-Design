@@ -135,33 +135,34 @@ while 1:
         # If checksums different, there was data error
         if sbitsum != clientChecksum or SeqNum != 0:
             # Resend the same sequence number back to the Client. This signals a NACK
-            ackPacket.append(SeqNum)
-            for i in clientChecksum:
-                ackPacket.append(i)
-            serverSocket.sendto(ackPacket, clientAddress)
-            print("Nack Sent, indexNumber", indexNumber)
-            state = 0
-        elif sbitsum == clientChecksum and SeqNum == 0:
-            ackPacket.append(SeqNum)
+            ackPacket.append(1)
             for i in sbitsum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
-            print("ACK Sent, indexNumber", indexNumber)
+            state = 0
+        elif sbitsum == clientChecksum and SeqNum == 0:
+            ackPacket.append(0)
+            for i in sbitsum:
+                ackPacket.append(i)
+            if Timeout(ack_loss_rate) == 0:
+                serverSocket.sendto(ackPacket, clientAddress)
+                if indexNumber > 0:
+                    file.write(writeDataPacket)
+                    print("Packet #", indexNumber, "Downloaded")
 
-            if indexNumber > 0:
-                file.write(writeDataPacket)
-                print("Packet #", indexNumber, "Downloaded")
+                state = 1
+                writeDataPacket = dataPacket
+                indexNumber += 1
 
-            state = 1
-            writeDataPacket = dataPacket
-            indexNumber += 1
-
-            if len(dataPacket) < 1024:
-                file.write(dataPacket)
-                print("Packet #", indexNumber, "Downloaded")
-                # Close the file
-                file.close()
-                break
+                if len(dataPacket) < 1024:
+                    file.write(dataPacket)
+                    print("Packet #", indexNumber, "Downloaded")
+                    # Close the file
+                    file.close()
+                    break
+            elif Timeout(ack_loss_rate) == 1:
+                print("ACK lost")
+                state = 0
 
     if state == 1:
         ackPacket = bytearray()
@@ -185,18 +186,16 @@ while 1:
         # If checksums different, there was data error
         if sbitsum != clientChecksum or SeqNum != 1:
             # Resend the same sequence number back to the Client. This signals a NACK
-            ackPacket.append(SeqNum)
+            ackPacket.append(0)
             for i in clientChecksum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
-            print("Nack Sent, indexNumber", indexNumber)
             state = 1
         elif sbitsum == clientChecksum and SeqNum == 1:
-            ackPacket.append(SeqNum)
+            ackPacket.append(1)
             for i in sbitsum:
                 ackPacket.append(i)
             serverSocket.sendto(ackPacket, clientAddress)
-            print("ACK Sent, indexNumber", indexNumber)
 
             if indexNumber > 0:
                 file.write(writeDataPacket)
