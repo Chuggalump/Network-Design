@@ -116,13 +116,16 @@ state = 0
 
 while 1:
     if state == 0:
+        # State: wait for call 0 from above
         sendPacket = bytearray()
         # create a packet and save it to the initialPacket variable, along with an index# to track it
         initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
 
+        # Make the checksum and convert it to bytes so it can be appended to the packet
         checksum = make_checksum(initialPacket)
         bitsum = checksum.to_bytes(2, byteorder='little')
 
+        # Create the sendPacket by appending sequence number, checksum, and data
         sendPacket.append(SeqNum0)
         for i in bitsum:
             sendPacket.append(i)
@@ -130,56 +133,70 @@ while 1:
             sendPacket.append(j)
 
         timeout1 = Timeout(data_loss_rate)
-        # Implement a data loss
+        # Implement random data loss
         if timeout1 == 0:
+            # If timeout is 0, no data loss. Send the packet
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
             state = 1
         elif timeout1 == 1:
+            # If timeout is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
             print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             state = 1
 
     elif state == 1:
+        # State: wait for ACK 0
+        # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
         try:
+            # Start a timer to track how long it took to receive the ACK packet
             startTime = time.time()
-            ackPacket, trashdata = clientSocket.recvfrom(2048)
+            ackPacket, trashdata = clientSocket.recvfrom(2048)      #trasdata is the address sent with the ACK. We don't need it
+            recvTime = time.time()
+            # Parse the data
             NewSeqNum = ackPacket[:1]
             serverChecksum = ackPacket[1:]
-            recvTime = time.time()
 
+            # Ensure the NewSeqNum is in int form so it can be properly compared below
             NewSeqNum = convert_bytes(NewSeqNum)
 
             NewSeqNum = ack_corrupt(NewSeqNum)
 
-            # if a different sequence number is received, we have the wrong ACK
+            # if a different sequence number is received or checksum is bad resend the packet
             if NewSeqNum != SeqNum0 or serverChecksum != bitsum:
-                # Resend the packet
+                # Sleep for the remaining time till timeout to ensure client and server are still in sync
                 remain = 0.05 - (recvTime - startTime)
                 time.sleep(remain)
+                # Resend the packet
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
+                # Loop back to beginning of state to wait for the proper ACK
                 state = 1
             # if the same sequence number is received, we have the right ACK
             elif NewSeqNum == SeqNum0 and serverChecksum == bitsum:
                 # set next state
                 state = 2
                 if len(initialPacket) < 1024:
+                    # If the dat is less than 1024 bytes we're on the last packet. Close the file and break
                     image.close()
                     break
         except timeout:
+            # If timeout occurs, print a statement and resend the same packet
             print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "resent")
             state = 1
 
     elif state == 2:
+        # State: wait for call 1 from above
         sendPacket = bytearray()
         # create a packet and save it to the initialPacket variable, along with an index# to track it
         initialPacket, packetIndex = make_packet(packet_size, image, packetIndex)
 
+        # Make the checksum and convert it to bytes so it can be appended to the packet
         checksum = make_checksum(initialPacket)
         bitsum = checksum.to_bytes(2, byteorder='little')
 
+        # Create the sendPacket by appending sequence number, checksum, and data
         sendPacket.append(SeqNum1)
         for i in bitsum:
             sendPacket.append(i)
@@ -187,43 +204,54 @@ while 1:
             sendPacket.append(j)
 
         timeout1 = Timeout(data_loss_rate)
-        # Implement a data loss
+        # Implement random data loss
         if timeout1 == 0:
+            # If timeout is 0, no data loss. Send the packet
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
             state = 3
         elif timeout1 == 1:
+            # If timeout is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
             print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             state = 3
 
     elif state == 3:
+        # State: wait for ACK 1
+        # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
         try:
+            # Start a timer to track how long it took to receive the ACK packet
             startTime = time.time()
             ackPacket, trashdata = clientSocket.recvfrom(2048)
+            recvTime = time.time()
+            # Parse the data
             NewSeqNum = ackPacket[:1]
             serverChecksum = ackPacket[1:]
-            recvTime = time.time()
 
+            # Ensure the NewSeqNum is in int form so it can be properly compared below
             NewSeqNum = convert_bytes(NewSeqNum)
 
             NewSeqNum = ack_corrupt(NewSeqNum)
 
             # if a different sequence number is received, we have the wrong ACK
             if NewSeqNum != SeqNum1 or serverChecksum != bitsum:
-                # Resend the packet
+                # Sleep for the remaining time till timeout to ensure client and server are still in sync
                 remain = 0.05 - (recvTime - startTime)
                 time.sleep(remain)
+                # Resend the packet
                 clientSocket.sendto(sendPacket, (serverName, serverPort))
                 print("Packet #", packetIndex, "resent")
+                # Loop back to beginning of state to wait for the proper ACK
                 state = 3
             # if the same sequence number is received, we have the right ACK
             elif NewSeqNum == SeqNum1 and serverChecksum == bitsum:
                 # set next state
                 state = 0
                 if len(initialPacket) < 1024:
+                    # If the dat is less than 1024 bytes we're on the last packet. Close the file and break
                     image.close()
                     break
         except timeout:
+            # If timeout occurs, print a statement and resend the same packet
             print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "resent")
