@@ -53,7 +53,7 @@ ackPacket = bytearray()
 recvPacket = bytearray()
 
 dat_error = 0
-ack_loss_rate = 0
+ack_loss_rate = 15
 
 
 def make_checksum(packet):
@@ -149,9 +149,9 @@ while 1:
                 ackPacket.append(i)
 
             # Implement random ACK Packet loss
-            ackTimer = Timeout(ack_loss_rate)
-            if ackTimer == 0:
-                # If ackTimer = 0, ACK packet isn't lost
+            ackTimer0 = Timeout(ack_loss_rate)
+            if ackTimer0 == 0:
+                # If ackTimer0 = 0, ACK packet isn't lost
                 serverSocket.sendto(ackPacket, clientAddress)
                 if indexNumber > 0:
                     # Write the previous packet received to the file
@@ -174,8 +174,8 @@ while 1:
                     file.close()
                     # Exit state machine
                     break
-            elif ackTimer == 1:
-                # If ackTimer = 1, packet is "lost". Simulate by not sending the ACK back to the client
+            elif ackTimer0 == 1:
+                # If ackTimer0 = 1, packet is "lost". Simulate by not sending the ACK back to the client
                 print("ACK lost")
                 state = 0
 
@@ -215,9 +215,9 @@ while 1:
                 ackPacket.append(i)
 
             # Implement random ACK Packet loss
-            ackTimer = Timeout(ack_loss_rate)
-            if ackTimer == 0:
-                # If ackTimer = 0, ACK packet isn't lost
+            ackTimer1 = Timeout(ack_loss_rate)
+            if ackTimer1 == 0:
+                # If ackTimer1 = 0, ACK packet isn't lost
                 serverSocket.sendto(ackPacket, clientAddress)
                 if indexNumber > 0:
                     # Write the previous packet received to the file
@@ -240,8 +240,8 @@ while 1:
                     file.close()
                     # Exit state machine
                     break
-            elif ackTimer == 1:
-                # If ackTimer = 1, packet is "lost". Simulate by not sending the ACK back to the client
+            elif ackTimer1 == 1:
+                # If ackTimer1 = 1, packet is "lost". Simulate by not sending the ACK back to the client
                 print("ACK lost")
                 state = 1
 

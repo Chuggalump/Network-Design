@@ -59,7 +59,7 @@ sendPacket = bytearray()
 initialPacket = bytearray()
 
 ack_error = 0
-data_loss_rate = 0
+data_loss_rate = 15
 
 
 # Define a make packet function that outputs a packet and an index number
@@ -90,7 +90,7 @@ def convert_bytes(data):
 
 def Timeout(test_Num):
     # Select a random int btwn 0 and 100
-    random.seed()
+    #random.seed()
     randNum = random.randrange(0, 100)
     # if randNum is less than the specified error rate, flip the bit
     if randNum < test_Num:
@@ -114,6 +114,8 @@ def ack_corrupt(sequence):
 
 state = 0
 
+start2 = time.time()
+
 while 1:
     if state == 0:
         # State: wait for call 0 from above
@@ -132,16 +134,16 @@ while 1:
         for j in initialPacket:
             sendPacket.append(j)
 
-        timeout1 = Timeout(data_loss_rate)
+        if_loss0 = Timeout(data_loss_rate)
         # Implement random data loss
-        if timeout1 == 0:
-            # If timeout is 0, no data loss. Send the packet
+        if if_loss0 == 1:
+            # If if_loss0 is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
+            print(packetIndex, "Data was lostAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            state = 1
+        else:
+            # Else, no data loss. Send the packet
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
-            state = 1
-        elif timeout1 == 1:
-            # If timeout is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
-            print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             state = 1
 
     elif state == 1:
@@ -182,9 +184,17 @@ while 1:
         except timeout:
             # If timeout occurs, print a statement and resend the same packet
             print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            clientSocket.sendto(sendPacket, (serverName, serverPort))
-            print("Packet #", packetIndex, "resent")
-            state = 1
+            if_loss1 = Timeout(data_loss_rate)
+            # Implement random data loss
+            if if_loss1 == 1:
+                # If if_loss1 is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
+                print(packetIndex, "Data was lostBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+                state = 1
+            else:
+                # Else, no data loss. Send the packet
+                clientSocket.sendto(sendPacket, (serverName, serverPort))
+                print("Packet #", packetIndex, "sent")
+                state = 1
 
     elif state == 2:
         # State: wait for call 1 from above
@@ -203,16 +213,16 @@ while 1:
         for j in initialPacket:
             sendPacket.append(j)
 
-        timeout1 = Timeout(data_loss_rate)
         # Implement random data loss
-        if timeout1 == 0:
-            # If timeout is 0, no data loss. Send the packet
+        if_loss2 = Timeout(data_loss_rate)
+        if if_loss2 == 1:
+            # If if_loss2 is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
+            print(packetIndex, "Data was lostCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+            state = 3
+        else:
+            # Else, no data loss. Send the packet
             clientSocket.sendto(sendPacket, (serverName, serverPort))
             print("Packet #", packetIndex, "sent")
-            state = 3
-        elif timeout1 == 1:
-            # If timeout is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
-            print("Data was lost!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             state = 3
 
     elif state == 3:
@@ -253,6 +263,17 @@ while 1:
         except timeout:
             # If timeout occurs, print a statement and resend the same packet
             print("Packet Timed Out!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            clientSocket.sendto(sendPacket, (serverName, serverPort))
-            print("Packet #", packetIndex, "resent")
-            state = 3
+            # Implement random data loss
+            if_loss3 = Timeout(data_loss_rate)
+            if if_loss3 == 1:
+                # If if_loss3 is 1, the packet is "lost" en route to the server. Simulate by not sending the packet
+                print(packetIndex, "Data was lostDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
+                state = 3
+            else:
+                # Else, no data loss. Send the packet
+                clientSocket.sendto(sendPacket, (serverName, serverPort))
+                print("Packet #", packetIndex, "sent")
+                state = 3
+
+end2 = start2
+print("Total time for completion was %s" % (time.time() - start2))
