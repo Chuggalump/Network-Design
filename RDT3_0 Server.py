@@ -53,8 +53,8 @@ ackPacket = bytearray()
 recvPacket = bytearray()
 final_handshake = False
 
-dat_error = 10
-ack_loss_rate = 10
+dat_error = 0
+ack_loss_rate = 0
 
 
 def make_checksum(packet):
@@ -71,14 +71,13 @@ def make_checksum(packet):
 def ack_loss(test_num):
     # Select a random int btwn 0 and 100
     rand_num = random.randrange(0, 100)
-    # if randNum is less than the specified error rate, flip the bit
     if rand_num < test_num:
-        # indicates loss
-        test_num = True
+        # Packet is "lost". Simulate by not sending the ACK back to the client
+        print("ACK lost")
     elif rand_num > test_num:
-        # indicates no loss
-        test_num = False
-    return test_num
+        # ACK packet isn't lost, send the ACK
+        serverSocket.sendto(ackPacket, clientAddress)
+        print("ACK Sent")
 
 
 def data_error(data):
@@ -132,14 +131,7 @@ while 1:
             for i in sbitsum:
                 ackPacket.append(i)
 
-            # Implement random ACK Packet loss
-            if not ack_loss(ack_loss_rate):
-                # If ack_loss is False, ACK packet isn't lost
-                serverSocket.sendto(ackPacket, clientAddress)
-                print("ACK Sent")
-            else:
-                # If ack_loss is True, packet is "lost". Simulate by not sending the ACK back to the client
-                print("ACK lost")
+            ack_loss(ack_loss_rate)
 
             # Write the dataPacket received to the file
             file.write(dataPacket)
@@ -158,7 +150,7 @@ while 1:
 
         # If checksums different, there was data error, if SeqNum is 1 then there's ACK error
         else:
-            serverSocket.sendto(ackPacket, clientAddress)
+            ack_loss(ack_loss_rate)
     else:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
         SeqNum = recvPacket[:2]
@@ -166,7 +158,8 @@ while 1:
             file.close()
             break
         else:
-            serverSocket.sendto(ackPacket, clientAddress)
+            ack_loss(ack_loss_rate)
+
 
 end_time = start_time
 print("Total time for completion was %s" % (time.time() - start_time))
