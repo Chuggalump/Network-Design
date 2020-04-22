@@ -34,7 +34,7 @@ modifiedMessage = message.decode().upper()
 print(modifiedMessage)  # Print received message to server's command line
 
 # PauseInput = input('Press Enter to Continue:')
-FileName = 'Pic.bmp'#input('File followed by ".filetype": ')
+FileName = 'Song.mp3'#input('File followed by ".filetype": ')
 
 message2 = "Ready to receive file"  # tell server that you are ready to receive file transfer
 serverSocket.sendto(message2.encode(), clientAddress)
@@ -53,8 +53,8 @@ ackPacket = bytearray()
 recvPacket = bytearray()
 final_handshake = False
 
-dat_error = 0
-ack_loss_rate = 0
+dat_error = 10
+ack_loss_rate = 10
 
 
 def make_checksum(packet):
@@ -73,11 +73,10 @@ def ack_loss(test_num):
     rand_num = random.randrange(0, 100)
     if rand_num < test_num:
         # Packet is "lost". Simulate by not sending the ACK back to the client
-        print("ACK lost")
+        pass
     elif rand_num > test_num:
         # ACK packet isn't lost, send the ACK
         serverSocket.sendto(ackPacket, clientAddress)
-        print("ACK Sent")
 
 
 def data_error(data):
@@ -96,7 +95,6 @@ def data_error(data):
             corrupted_data.append(i)
         for j in corrupt:
             corrupted_data.append(j)
-        print("corrupted_data length", len(corrupted_data))
         return corrupted_data
     else:
         return data
@@ -110,7 +108,6 @@ while 1:
 
         # Parse data
         SeqNum = recvPacket[:2]
-        print('Packet received. Received SeqNum is: ', SeqNum)
         clientChecksum = recvPacket[2:4]
         dataPacket = recvPacket[4:]
 
@@ -126,7 +123,6 @@ while 1:
             ackPacket = bytearray()
             # Append the ACK to the packet
             ackPacket.extend(SNumber)
-            print("Send packet after Seq Num =", ackPacket)
 
             for i in sbitsum:
                 ackPacket.append(i)
@@ -135,13 +131,10 @@ while 1:
 
             # Write the dataPacket received to the file
             file.write(dataPacket)
-            print("Packet #", indexNumber, "Downloaded")
 
             SNumber = int.from_bytes(SNumber, byteorder='big')
-            print("Previous SeqNum was:", SNumber)
             SNumber += 1
             SNumber = SNumber.to_bytes(2, byteorder='big')
-            print('Updated SeqNum is: ', SNumber)
             indexNumber += 1
 
             # If last packet, close the file
