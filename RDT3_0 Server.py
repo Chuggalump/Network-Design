@@ -1,4 +1,4 @@
-# Phase 4
+# Phase 5
 # Johnathan Saniuk, Amadeusz Piwowarczyk, Vishal Patel
 # Purpose: Receive an image packet by packet and put it into a new file called Picture.bmp
 # References: [1] J. Kurose and K. Ross, Computer Networking. Harlow, United Kingdom: Pearson Education Limited, 2017, pp. 159-164.
@@ -45,15 +45,16 @@ start_time = time.time()
 x = False
 indexNumber = 0
 writeDataPacket = 0
-OldSeqNum = b'\x00'
-SeqNum = 0
+SNumber = b'\x00\x00'
+oldSeqNum = SNumber
 file = open(FileName, 'wb')
 print("Ready to download file ...")
 ackPacket = bytearray()
 recvPacket = bytearray()
+final_handshake = False
 
-dat_error = 0
-ack_loss_rate = 15
+dat_error = 10
+ack_loss_rate = 10
 
 
 def make_checksum(packet):
@@ -67,25 +68,17 @@ def make_checksum(packet):
     return (~res) & 0xffff
 
 
-def convert_bytes(data):
-    if data == b'\x00\x00' or data == b'\x00' or data == 0:
-        data = 0b0
-    elif data == b'\x01\x00' or data == b'\x01' or data == b'\x00\x01' or data == 1:
-        data = 0b1
-    return data
-
-
-def Timeout(test_Num):
+def ack_loss(test_num):
     # Select a random int btwn 0 and 100
-    randNum = random.randrange(0, 100)
+    rand_num = random.randrange(0, 100)
     # if randNum is less than the specified error rate, flip the bit
-    if randNum < test_Num:
+    if rand_num < test_num:
         # indicates loss
-         test_Num = 1
-    elif randNum > test_Num:
+        test_num = True
+    elif rand_num > test_num:
         # indicates no loss
-        test_Num = 0
-    return test_Num
+        test_num = False
+    return test_num
 
 
 def data_error(data):
@@ -110,20 +103,17 @@ def data_error(data):
         return data
 
 
-state = 0
-
 while 1:
-    if state == 0:
-        # State: Wait for 0 from below
-        ackPacket = bytearray()
+
+    if not final_handshake:
         # Wait for the packet to come from the client
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
         # Parse data
-        SeqNum = recvPacket[:1]
-        SeqNum = convert_bytes(SeqNum)
-        clientChecksum = recvPacket[1:3]
-        dataPacket = recvPacket[3:]
+        SeqNum = recvPacket[:2]
+        print('Packet received. Received SeqNum is: ', SeqNum)
+        clientChecksum = recvPacket[2:4]
+        dataPacket = recvPacket[4:]
 
         # Simulate possible data corruption
         dataPacket = data_error(dataPacket)
@@ -131,119 +121,52 @@ while 1:
         serverChecksum = make_checksum(dataPacket)
         # Convert Server-side checksum into bytes
         sbitsum = serverChecksum.to_bytes(2, byteorder='little')
+
+        # If checksums the same and SeqNum = 0, everything is right with the world
+        if sbitsum == clientChecksum and SeqNum == SNumber:
+            ackPacket = bytearray()
+            # Append the ACK to the packet
+            ackPacket.extend(SNumber)
+            print("Send packet after Seq Num =", ackPacket)
+
+            for i in sbitsum:
+                ackPacket.append(i)
+
+            # Implement random ACK Packet loss
+            if not ack_loss(ack_loss_rate):
+                # If ack_loss is False, ACK packet isn't lost
+                serverSocket.sendto(ackPacket, clientAddress)
+                print("ACK Sent")
+            else:
+                # If ack_loss is True, packet is "lost". Simulate by not sending the ACK back to the client
+                print("ACK lost")
+
+            # Write the dataPacket received to the file
+            file.write(dataPacket)
+            print("Packet #", indexNumber, "Downloaded")
+
+            SNumber = int.from_bytes(SNumber, byteorder='big')
+            print("Previous SeqNum was:", SNumber)
+            SNumber += 1
+            SNumber = SNumber.to_bytes(2, byteorder='big')
+            print('Updated SeqNum is: ', SNumber)
+            indexNumber += 1
+
+            # If last packet, close the file
+            if len(dataPacket) < 1024:
+                final_handshake = True
 
         # If checksums different, there was data error, if SeqNum is 1 then there's ACK error
-        if sbitsum != clientChecksum or SeqNum != 0:
-            # Resend the same sequence number and checksum back to the Client. This signals a NACK
-            ackPacket.append(1)
-            for i in sbitsum:
-                ackPacket.append(i)
+        else:
             serverSocket.sendto(ackPacket, clientAddress)
-            # Ensure state doesn't change so that it keeps looking for the proper packet
-            state = 0
-        # If checksums the same and SeqNum = 0, everything is right with the world
-        elif sbitsum == clientChecksum and SeqNum == 0:
-            # Append the ACK to the packet
-            ackPacket.append(0)
-            for i in sbitsum:
-                ackPacket.append(i)
-
-            # Implement random ACK Packet loss
-            ackTimer0 = Timeout(ack_loss_rate)
-            if ackTimer0 == 0:
-                # If ackTimer0 = 0, ACK packet isn't lost
-                serverSocket.sendto(ackPacket, clientAddress)
-                if indexNumber > 0:
-                    # Write the previous packet received to the file
-                    file.write(writeDataPacket)
-                    print("Packet #", indexNumber, "Downloaded")
-
-                # Set next state
-                state = 1
-                # Update the variable that holds the previous data with current data (we know this packet is good)
-                writeDataPacket = dataPacket
-                # Increment indexNumber
-                indexNumber += 1
-
-                # If last packet
-                if len(dataPacket) < 1024:
-                    # Write the current data to the file
-                    file.write(dataPacket)
-                    print("Packet #", indexNumber, "Downloaded")
-                    # Close the file
-                    file.close()
-                    # Exit state machine
-                    break
-            elif ackTimer0 == 1:
-                # If ackTimer0 = 1, packet is "lost". Simulate by not sending the ACK back to the client
-                print("ACK lost")
-                state = 0
-
-    if state == 1:
-        # State: Wait for 1 from below
-        ackPacket = bytearray()
-        # Wait for the packet to come from the client
+    else:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
-
-        # Parse data
-        SeqNum = recvPacket[:1]
-        SeqNum = convert_bytes(SeqNum)
-        clientChecksum = recvPacket[1:3]
-        dataPacket = recvPacket[3:]
-
-        # Simulate possible data corruption
-        dataPacket = data_error(dataPacket)
-        # Make a checksum out of received data (post corruption simulation)
-        serverChecksum = make_checksum(dataPacket)
-        # Convert Server-side checksum into bytes
-        sbitsum = serverChecksum.to_bytes(2, byteorder='little')
-
-        # If checksums different, there was data error
-        if sbitsum != clientChecksum or SeqNum != 1:
-            # Resend the same sequence number back to the Client. This signals a NACK
-            ackPacket.append(0)
-            for i in clientChecksum:
-                ackPacket.append(i)
+        SeqNum = recvPacket[:2]
+        if SeqNum == SNumber:
+            file.close()
+            break
+        else:
             serverSocket.sendto(ackPacket, clientAddress)
-            # Ensure state doesn't change so that it keeps looking for the proper packet
-            state = 1
-        # If checksums the same and SeqNum = 0, everything is right with the world
-        elif sbitsum == clientChecksum and SeqNum == 1:
-            # Append the ACK to the packet
-            ackPacket.append(1)
-            for i in sbitsum:
-                ackPacket.append(i)
-
-            # Implement random ACK Packet loss
-            ackTimer1 = Timeout(ack_loss_rate)
-            if ackTimer1 == 0:
-                # If ackTimer1 = 0, ACK packet isn't lost
-                serverSocket.sendto(ackPacket, clientAddress)
-                if indexNumber > 0:
-                    # Write the previous packet received to the file
-                    file.write(writeDataPacket)
-                    print("Packet #", indexNumber, "Downloaded")
-
-                # Set next state
-                state = 0
-                # Update the variable that holds the previous data with current data (we know this packet is good)
-                writeDataPacket = dataPacket
-                # Increment indexNumber
-                indexNumber += 1
-
-                # If last packet
-                if len(dataPacket) < 1024:
-                    # Write the current data to the file
-                    file.write(dataPacket)
-                    print("Packet #", indexNumber, "Downloaded")
-                    # Close the file
-                    file.close()
-                    # Exit state machine
-                    break
-            elif ackTimer1 == 1:
-                # If ackTimer1 = 1, packet is "lost". Simulate by not sending the ACK back to the client
-                print("ACK lost")
-                state = 1
 
 end_time = start_time
 print("Total time for completion was %s" % (time.time() - start_time))
