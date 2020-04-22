@@ -77,8 +77,8 @@ base = 0
 # Instantiate Timer
 ack_timer = Timer(0.055)
 
-ack_error = 0
-data_loss_rate = 0
+ack_error = 10
+data_loss_rate = 10
 
 
 # Define a make packet function that outputs a packet and an index number
@@ -132,6 +132,15 @@ def ack_corrupt():
         return False
 
 
+def final_handshake(da_base):
+    da_base = da_base.to_bytes(2, byteorder='big')
+    final_packet = bytearray()
+    for i in da_base:
+        final_packet.append(i)
+    clientSocket.sendto(final_packet, (serverName, serverPort))
+    print("Final packet sent")
+
+
 def packet_catcher(client_socket):
     global base
     global nextSeqNum
@@ -139,9 +148,6 @@ def packet_catcher(client_socket):
     expected_seq_num = 0
     while 1:
         # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
-        if (base / len(packet_Queue)) >= 1:
-            image.close()
-            _thread.exit()
 
         if ack_timer.timeout():
             expected_seq_num = base + N
@@ -184,6 +190,10 @@ def packet_catcher(client_socket):
         else:
             print("I done goofed")
 
+        if (base / len(packet_Queue)) >= 1:
+            image.close()
+            _thread.exit()
+
 
 start2 = time.time()
 
@@ -218,10 +228,13 @@ if __name__ == "__main__":
                         ack_timer.start()
                     clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
                     print("Packet #", nextSeqNum, "sent")
-                if ((base + 1) / len(packet_Queue)) >= 1:
+                if (base / len(packet_Queue)) >= 1:
+                    final_handshake(base)
+                    ack_timer.stop()
                     break
             elif data_loss(data_loss_rate):
-                # Else if data_loss is True, the packet is "lost" en route to the server. Simulate by not sending the packet
+                # Else if data_loss is True, the packet is "lost" en route to the server.
+                # Simulate by not sending the packet
                 print(base, "Data was lost!")
 
             nextSeqNum_lock.acquire()
