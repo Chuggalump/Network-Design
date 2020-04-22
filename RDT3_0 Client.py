@@ -71,14 +71,14 @@ nextSeqNum = 0
 # Create an empty dictionary to store the sent but unacked packets
 packet_Queue = {}
 # Define Window Size (0 to N)
-N = 9
+N = 19
 # Beginning of the window
 base = 0
 # Instantiate Timer
-ack_timer = Timer(0.055)
+ack_timer = Timer(0.05)
 
-ack_error = 10
-data_loss_rate = 10
+ack_error = 0
+data_loss_rate = 0
 
 
 # Define a make packet function that outputs a packet and an index number
@@ -172,11 +172,13 @@ def packet_catcher(client_socket):
             print("Cumulative ACK, base set to:", (NewSeqNum + 1))
             expected_seq_num = base
         elif serverChecksum != bitsum or ack_corrupt():
-            print("Corrupt Checksum/ACK")
             # Timeout to resend window
+            print("Corrupt Checksum/ACK")
+            pass
         elif NewSeqNum < expected_seq_num:
             # Duplicate ACK, continue on
             print("Duplicate ACK", NewSeqNum, "received")
+            pass
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
             print("Proper ACK", NewSeqNum, "received")
             base_lock.acquire()
@@ -236,6 +238,7 @@ if __name__ == "__main__":
                 # Else if data_loss is True, the packet is "lost" en route to the server.
                 # Simulate by not sending the packet
                 print(base, "Data was lost!")
+                pass
 
             nextSeqNum_lock.acquire()
             nextSeqNum += 1
