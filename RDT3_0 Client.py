@@ -48,7 +48,7 @@ print(modifiedMessage.decode().upper())
 
 
 # Store selected image into a variable
-FileName = 'picture.bmp'  # input('Write the file name you wish to send: ')
+FileName = '06 Cry For Eternity.mp3'  # input('Write the file name you wish to send: ')
 image = open(FileName, 'rb')
 
 # Set the packet size and create an index to count packets
@@ -71,11 +71,11 @@ nextSeqNum = 0
 # Create an empty dictionary to store the sent but unacked packets
 packet_Queue = {}
 # Define Window Size (0 to N)
-N = 9
+N = 19
 # Beginning of the window
 base = 0
 # Instantiate Timer
-ack_timer = Timer(0.055)
+ack_timer = Timer(0.05)
 
 ack_error = 10
 data_loss_rate = 10
@@ -138,7 +138,6 @@ def final_handshake(da_base):
     for i in da_base:
         final_packet.append(i)
     clientSocket.sendto(final_packet, (serverName, serverPort))
-    print("Final packet sent")
 
 
 def packet_catcher(client_socket):
@@ -151,7 +150,6 @@ def packet_catcher(client_socket):
 
         if ack_timer.timeout():
             expected_seq_num = base + N
-            print("expected seq num is now:", expected_seq_num)
 
         # trasdata is the address sent with the ACK. We don't need it
         ackPacket, trashdata = client_socket.recvfrom(2048)
@@ -169,21 +167,18 @@ def packet_catcher(client_socket):
             base_lock.acquire()
             base = NewSeqNum + 1
             base_lock.release()
-            print("Cumulative ACK, base set to:", (NewSeqNum + 1))
             expected_seq_num = base
         elif serverChecksum != bitsum or ack_corrupt():
-            print("Corrupt Checksum/ACK")
             # Timeout to resend window
+            pass
         elif NewSeqNum < expected_seq_num:
             # Duplicate ACK, continue on
-            print("Duplicate ACK", NewSeqNum, "received")
+            pass
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
-            print("Proper ACK", NewSeqNum, "received")
             base_lock.acquire()
             base = NewSeqNum + 1
             base_lock.release()
             expected_seq_num = base
-            print("base =", base)
 
             if ack_timer.running:
                 ack_timer.stop()
@@ -215,7 +210,6 @@ if __name__ == "__main__":
         if nextSeqNum > 0 and ack_timer.running() is False:
             ack_timer.start()
         if ack_timer.timeout():
-            print("Packet #", base, "timed out!")
             if ack_timer.running():
                 ack_timer.stop()
             nextSeqNum = base
@@ -227,7 +221,6 @@ if __name__ == "__main__":
                     if nextSeqNum == base:
                         ack_timer.start()
                     clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
-                    print("Packet #", nextSeqNum, "sent")
                 if (base / len(packet_Queue)) >= 1:
                     final_handshake(base)
                     ack_timer.stop()
@@ -235,7 +228,7 @@ if __name__ == "__main__":
             elif data_loss(data_loss_rate):
                 # Else if data_loss is True, the packet is "lost" en route to the server.
                 # Simulate by not sending the packet
-                print(base, "Data was lost!")
+                pass
 
             nextSeqNum_lock.acquire()
             nextSeqNum += 1
