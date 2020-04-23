@@ -28,6 +28,11 @@ serverSocket.bind(("", serverPort))
 message, clientAddress = serverSocket.recvfrom(2048)
 # Receive packet from client just to have the return info to reply to the client
 
+# Receive the window size from Client
+N, trashAddress = serverSocket.recvfrom(2048)
+N = int.from_bytes(N, byteorder='big')
+print("Window Size =", N)
+
 modifiedMessage = message.decode().upper()
 # Takes message from client after converting it to a string and uses upper() to capitalize it
 
@@ -42,16 +47,18 @@ start_time = time.time()
 
 # ***********************
 
-x = False
 indexNumber = 0
 writeDataPacket = 0
 SNumber = 0
-oldSeqNum = SNumber
 file = open(FileName, 'wb')
 print("Ready to download file ...")
 ackPacket = bytearray()
 recvPacket = bytearray()
 final_handshake = False
+# Base of the buffering Dictionary
+base = 0
+
+final_packet = 0
 
 received_Queue = {}
 
@@ -134,31 +141,43 @@ while 1:
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
         if sbitsum == clientChecksum and SeqNum == SNumber:
-
             # Send the ACK packet back to sender, calculating if there's loss or not
             ack_loss(ack_loss_rate)
 
             # SeqNum is correct, buffer data to the Queue
             received_Queue[SeqNum] = dataPacket
 
-            # Write the dataPacket received to the file
-            file.write(received_Queue[SeqNum])
-            print("Packet #", indexNumber, "Downloaded")
+            # Download the data for all in order packets
+            while SNumber in received_Queue:
+                file.write(received_Queue[SNumber])
+                print("Packet #", indexNumber, "Downloaded")
+                SNumber += 1
+                indexNumber += 1
+                print('Updated SeqNum is: ', SNumber)
 
-            print("Previous SeqNum was:", SNumber)
-            SNumber += 1
-            print('Updated SeqNum is: ', SNumber)
-            indexNumber += 1
-
-            # If last packet, close the file
+            # If last packet
             if len(dataPacket) < 1024:
+                final_packet = SNumber
+
+            if final_packet == SNumber:
                 final_handshake = True
 
-        # If checksums different, there was data error, if SeqNum is 1 then there's ACK error
-        elif SeqNum > SNumber:
-            # Packet is out of order, send ACK for this packet and buffer data
+        # If packet is good but out of order
+        elif sbitsum == clientChecksum and SeqNum > SNumber:
+            # Send the ACK packet back to sender, calculating if there's loss or not
             ack_loss(ack_loss_rate)
+            # SeqNum is out of order but still good, buffer data to the Queue
             received_Queue[SeqNum] = dataPacket
+            # If last packet, close the file
+            if len(dataPacket) < 1024:
+                final_packet = SeqNum
+        # If packet is a duplicate
+        elif SeqNum < SNumber:
+            # Send the ACK packet back to sender, calculating if there's loss or not
+            ack_loss(ack_loss_rate)
+        else:
+            # Checksum fail, drop packet and do nothing
+            pass
     else:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
         SeqNum = recvPacket[:2]
