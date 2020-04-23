@@ -7,7 +7,6 @@
 # Enable the creation of sockets
 from socket import *
 import array
-import sys
 import random
 import time
 
@@ -34,11 +33,18 @@ modifiedMessage = message.decode().upper()
 print(modifiedMessage)  # Print received message to server's command line
 
 # PauseInput = input('Press Enter to Continue:')
-FileName = 'Pic.bmp'#input('File followed by ".filetype": ')
+FileName = input('File name followed by ".filetype": ')
 
-message2 = "Ready to receive file"  # tell server that you are ready to receive file transfer
+print("\nEnter Error/Loss below. If no Error/Loss, enter a '0' ")
+
+# Ask user to input Eror/Loss simulation for packet transfer
+dat_error = int(input('Enter Data Error percent for packet transfer: '))
+ack_loss_rate = int(input('Enter ACK Loss percent for packet transfer: '))
+
+print("\nWaiting for client to send packets . . . .\n")
+
+message2 = "Sender is ready to receive packets . . ."  # tell server that you are ready to receive file transfer
 serverSocket.sendto(message2.encode(), clientAddress)
-start_time = time.time()
 
 # ***********************
 
@@ -48,13 +54,13 @@ writeDataPacket = 0
 SNumber = b'\x00\x00'
 oldSeqNum = SNumber
 file = open(FileName, 'wb')
-print("Ready to download file ...")
+# print("Ready to download file ...")
 ackPacket = bytearray()
 recvPacket = bytearray()
 final_handshake = False
 
-dat_error = 0
-ack_loss_rate = 0
+# dat_error = 0
+# ack_loss_rate = 0
 
 
 def make_checksum(packet):
@@ -73,11 +79,12 @@ def ack_loss(test_num):
     rand_num = random.randrange(0, 100)
     if rand_num < test_num:
         # Packet is "lost". Simulate by not sending the ACK back to the client
-        print("ACK lost")
+        # print("ACK lost")
+        pass
     elif rand_num > test_num:
         # ACK packet isn't lost, send the ACK
         serverSocket.sendto(ackPacket, clientAddress)
-        print("ACK Sent")
+        # print("ACK Sent")
 
 
 def data_error(data):
@@ -86,7 +93,7 @@ def data_error(data):
     # if randNum is less than the specified error rate,
     if randNum < dat_error:
         corrupted_data = bytearray()
-        #Throw some simple corruptor bits in here. Any 0's in the data will become 1's where there is a 1
+        # Throw some simple corruptor bits in here. Any 0's in the data will become 1's where there is a 1
         corruption = data[1022:]
         not_corrupt = data[:1022]
         corrupt = int.from_bytes(corruption, byteorder='little', signed=False)
@@ -96,11 +103,13 @@ def data_error(data):
             corrupted_data.append(i)
         for j in corrupt:
             corrupted_data.append(j)
-        print("corrupted_data length", len(corrupted_data))
+        # print("corrupted_data length", len(corrupted_data))
         return corrupted_data
     else:
         return data
 
+
+start_time = time.time()
 
 while 1:
 
@@ -110,7 +119,7 @@ while 1:
 
         # Parse data
         SeqNum = recvPacket[:2]
-        print('Packet received. Received SeqNum is: ', SeqNum)
+        # print('Packet received. Received SeqNum is: ', SeqNum)
         clientChecksum = recvPacket[2:4]
         dataPacket = recvPacket[4:]
 
@@ -126,7 +135,7 @@ while 1:
             ackPacket = bytearray()
             # Append the ACK to the packet
             ackPacket.extend(SNumber)
-            print("Send packet after Seq Num =", ackPacket)
+            # print("Send packet after Seq Num =", ackPacket)
 
             for i in sbitsum:
                 ackPacket.append(i)
@@ -135,13 +144,13 @@ while 1:
 
             # Write the dataPacket received to the file
             file.write(dataPacket)
-            print("Packet #", indexNumber, "Downloaded")
+            # print("Packet #", indexNumber, "Downloaded")
 
             SNumber = int.from_bytes(SNumber, byteorder='big')
-            print("Previous SeqNum was:", SNumber)
+            # print("Previous SeqNum was:", SNumber)
             SNumber += 1
             SNumber = SNumber.to_bytes(2, byteorder='big')
-            print('Updated SeqNum is: ', SNumber)
+            # print('Updated SeqNum is: ', SNumber)
             indexNumber += 1
 
             # If last packet, close the file
