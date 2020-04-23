@@ -13,7 +13,7 @@ import time
 import _thread
 from Timer_Class import Timer
 
-# Define server name (or IP) and Port#
+# Define server name (or IP) and Port #
 from typing import Any, Tuple
 
 # start_time = time.time()
