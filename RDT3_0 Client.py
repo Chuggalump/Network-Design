@@ -1,13 +1,12 @@
 # Phase 5
 # Johnathan Saniuk, Amadeusz Piwowarczyk, Vishal Patel
-# Purpose: Send a file from client to server using checksum to find errors and resend the packet if an error has occurred
+# Purpose: Phase 4 with the addition that there's a send window and multi-threading for pipe-lining
 # References: [1] J. Kurose and K. Ross, Computer Networking. Harlow, United Kingdom: Pearson Education Limited, 2017, pp. 159-164.
 #             [2] https://stackoverflow.com/questions/10411085/converting-integer-to-binary-in-python
-# https://www.geeksforgeeks.org/multithreading-python-set-1/   used to find multithreading
+#             [3] https://www.geeksforgeeks.org/multithreading-python-set-1/   used to find multithreading
 
 # Enable the creation of sockets
 from socket import *
-from threading import Timer
 import array
 import random
 import time
@@ -18,17 +17,24 @@ from Timer_Class import Timer
 from typing import Any, Tuple
 
 # start_time = time.time()
-serverName = '192.168.1.239'  # input('Please write your IPv4 IP here: ')
-'''   '192.168.1.239'   '''
-'''   '192.168.1.105'   '''
+serverName = input('Please enter your IPv4 IP here: ')
 serverPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
 clientSocket = socket(AF_INET, SOCK_DGRAM)
-print("clientSocket:", clientSocket)
+
+# Ask user to enter window size, window size defines # of packets sent at a single time (sliding window if prop ack received)
+N = int(input('Enter window size for packet transfer: '))
+
+# *********************** Ask sender to input simulation Error/Loss during transfer
+print("Enter Error/Loss below. If no Error/Loss, enter a '0' \n")
+ack_error = int(input('Enter ACK Error percent for packet transfer: '))
+data_loss_rate = int(input('Enter Data Loss percent for packet transfer: '))
+
+print("\nWaiting for server....................\n")
 
 # *********************** Send client a question to know when files are ready to be sent over
-message = ('Enter File Name to transfer file!')
+message = 'Enter File Name to transfer file!'
 # waits for client to input a message and then message is stored in the "message" variable
 
 clientSocket.sendto(message.encode(), (serverName, serverPort))
@@ -48,13 +54,13 @@ print(modifiedMessage.decode().upper())
 
 
 # Store selected image into a variable
-FileName = 'picture.bmp'  # input('Write the file name you wish to send: ')
+FileName = input('Write the file name you wish to send: ')
 image = open(FileName, 'rb')
 
 # Set the packet size and create an index to count packets
 packet_size = 1024
 packetIndex = 0
-print("packet size is: ", packet_size)
+# print("packet size is: ", packet_size)
 
 # Mutexes
 base_lock = _thread.allocate_lock()
@@ -68,17 +74,17 @@ initialPacket = bytearray()
 bitsum = 0
 # Variable to track which packet in the queue we're on
 nextSeqNum = 0
-# Create an empty dictionary to store the sent but unacked packets
+# Create an empty dictionary to store the sent but un-ACKed packets
 packet_Queue = {}
 # Define Window Size (0 to N)
-N = 9
+# N = 9
 # Beginning of the window
 base = 0
 # Instantiate Timer
-ack_timer = Timer(0.055)
+ack_timer = Timer(0.05)
 
-ack_error = 10
-data_loss_rate = 10
+# ack_error = 0
+# data_loss_rate = 0
 
 
 # Define a make packet function that outputs a packet and an index number
@@ -138,7 +144,7 @@ def final_handshake(da_base):
     for i in da_base:
         final_packet.append(i)
     clientSocket.sendto(final_packet, (serverName, serverPort))
-    print("Final packet sent")
+    # print("Final packet sent")
 
 
 def packet_catcher(client_socket):
@@ -151,7 +157,7 @@ def packet_catcher(client_socket):
 
         if ack_timer.timeout():
             expected_seq_num = base + N
-            print("expected seq num is now:", expected_seq_num)
+            # print("expected seq num is now:", expected_seq_num)
 
         # trasdata is the address sent with the ACK. We don't need it
         ackPacket, trashdata = client_socket.recvfrom(2048)
@@ -169,26 +175,26 @@ def packet_catcher(client_socket):
             base_lock.acquire()
             base = NewSeqNum + 1
             base_lock.release()
-            print("Cumulative ACK, base set to:", (NewSeqNum + 1))
+            # print("Cumulative ACK, base set to:", (NewSeqNum + 1))
             expected_seq_num = base
         elif serverChecksum != bitsum or ack_corrupt():
-            print("Corrupt Checksum/ACK")
+            # print("Corrupt Checksum/ACK")
             # Timeout to resend window
+            pass
         elif NewSeqNum < expected_seq_num:
             # Duplicate ACK, continue on
-            print("Duplicate ACK", NewSeqNum, "received")
+            # print("Duplicate ACK", NewSeqNum, "received")
+            pass
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
-            print("Proper ACK", NewSeqNum, "received")
+            # print("Proper ACK", NewSeqNum, "received")
             base_lock.acquire()
             base = NewSeqNum + 1
             base_lock.release()
             expected_seq_num = base
-            print("base =", base)
+            # print("base =", base)
 
             if ack_timer.running:
                 ack_timer.stop()
-        else:
-            print("I done goofed")
 
         if (base / len(packet_Queue)) >= 1:
             image.close()
@@ -215,7 +221,7 @@ if __name__ == "__main__":
         if nextSeqNum > 0 and ack_timer.running() is False:
             ack_timer.start()
         if ack_timer.timeout():
-            print("Packet #", base, "timed out!")
+            # print("Packet #", base, "timed out!")
             if ack_timer.running():
                 ack_timer.stop()
             nextSeqNum = base
@@ -227,7 +233,7 @@ if __name__ == "__main__":
                     if nextSeqNum == base:
                         ack_timer.start()
                     clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
-                    print("Packet #", nextSeqNum, "sent")
+                    # print("Packet #", nextSeqNum, "sent")
                 if (base / len(packet_Queue)) >= 1:
                     final_handshake(base)
                     ack_timer.stop()
@@ -235,7 +241,8 @@ if __name__ == "__main__":
             elif data_loss(data_loss_rate):
                 # Else if data_loss is True, the packet is "lost" en route to the server.
                 # Simulate by not sending the packet
-                print(base, "Data was lost!")
+                # print(base, "Data was lost!")
+                pass
 
             nextSeqNum_lock.acquire()
             nextSeqNum += 1
@@ -243,5 +250,8 @@ if __name__ == "__main__":
 
 end2 = start2
 print("Total time for completion was %s" % (time.time() - start2))
+
+
+
 
 # RRRRREEEEEEEEEEEeeeeeeeeEEEEEEEEeeeeeeEEEEEeeeEeEEeEEEEEEEEEEEEEEEEE
