@@ -36,6 +36,12 @@ clientSocket.sendto(message.encode(), (serverName, serverPort))
 # sendto() attaches destination address to message and sends resulting packet into the process's socket (clientSocket)
 # We didn't need to specify port number of client because we want the system to do it automatically for us
 
+# Define Window Size (0 to N)
+N = 9
+N = N.to_bytes(1, byteorder='big')
+clientSocket.sendto(N, (serverName, serverPort))
+N = int.from_bytes(N, byteorder='big')
+
 modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
 # Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
 # serverAddress contains both the server's IP and server's port number
@@ -54,11 +60,10 @@ image = open(FileName, 'rb')
 # Set the packet size and create an index to count packets
 packet_size = 1024
 packetIndex = 0
-print("packet size is: ", packet_size)
+print("packet size is:", packet_size)
 
 # Mutexes
 base_lock = _thread.allocate_lock()
-nextSeqNum_lock = _thread.allocate_lock()
 expected_lock = _thread.allocate_lock()
 
 # Variable to add the Sequence Number to each packet
@@ -70,12 +75,12 @@ bitsum = 0
 nextSeqNum = 0
 # Create an empty dictionary to store the sent but unacked packets
 packet_Queue = {}
-# Define Window Size (0 to N)
-N = 19
+# Create a dictionary to store ACKs
+ack_Queue = {}
 # Beginning of the window
 base = 0
 # Instantiate Timer
-ack_timer = Timer(0.05)
+ack_timer = Timer(0.055)
 
 ack_error = 0
 data_loss_rate = 0
@@ -97,18 +102,18 @@ def make_packet(csize, file_name, seq_num):
     bit_sum = checksum.to_bytes(2, byteorder='little')
 
     # Create the sendPacket by appending sequence number, checksum, and data
-    send_Packet = bytearray()
-    send_Packet.extend(seq_num)
+    send_packet = bytearray()
+    send_packet.extend(seq_num)
     seq_num = int.from_bytes(seq_num, byteorder='big')
     seq_num += 1
     seq_num = seq_num.to_bytes(2, byteorder='big')
 
     for i in bit_sum:
-        send_Packet.append(i)
+        send_packet.append(i)
     for j in packet:
-        send_Packet.append(j)
+        send_packet.append(j)
 
-    return send_Packet, seq_num
+    return send_packet, seq_num
 
 
 def data_loss(test_num):
@@ -143,14 +148,13 @@ def final_handshake(da_base):
 
 def packet_catcher(client_socket):
     global base
-    global nextSeqNum
     # Variable to track the expected Sequence Number we receive from the Server
     expected_seq_num = 0
     while 1:
         # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
 
         if ack_timer.timeout():
-            expected_seq_num = base + N
+            expected_seq_num = base
             print("expected seq num is now:", expected_seq_num)
 
         # trasdata is the address sent with the ACK. We don't need it
@@ -164,28 +168,27 @@ def packet_catcher(client_socket):
         bitsum = packet_Queue[NewSeqNum]
         bitsum = bitsum[2:4]
 
-        if NewSeqNum > expected_seq_num:
-            # Cumulative ACK, set base to NewSeqNum + 1 and update expected_seq_num
-            base_lock.acquire()
-            base = NewSeqNum + 1
-            base_lock.release()
-            print("Cumulative ACK, base set to:", (NewSeqNum + 1))
-            expected_seq_num = base
-        elif serverChecksum != bitsum or ack_corrupt():
+        if serverChecksum != bitsum:
             # Timeout to resend window
-            print("Corrupt Checksum/ACK")
-            pass
+            print("Corrupt Checksum")
+        elif ack_corrupt():
+            # Timeout to resend window
+            print("Corrupt ACK")
+        elif NewSeqNum > expected_seq_num and serverChecksum == bitsum:
+            ack_Queue[NewSeqNum] = True
+            print("Out of order ACK", NewSeqNum, "received")
         elif NewSeqNum < expected_seq_num:
             # Duplicate ACK, continue on
             print("Duplicate ACK", NewSeqNum, "received")
-            pass
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
             print("Proper ACK", NewSeqNum, "received")
-            base_lock.acquire()
-            base = NewSeqNum + 1
-            base_lock.release()
-            expected_seq_num = base
-            print("base =", base)
+            ack_Queue[base] = True
+            while base in ack_Queue:
+                base_lock.acquire()
+                base += 1
+                base_lock.release()
+                expected_seq_num = base
+                print("base =", base)
 
             if ack_timer.running:
                 ack_timer.stop()
@@ -212,6 +215,11 @@ if __name__ == "__main__":
     _thread.start_new_thread(packet_catcher, (clientSocket,))
 
     while 1:
+        '''
+        Don't buffer the whole thing initially, only buffer 20 packets above the window at all times
+        while (base + N + 20) not in packet_Queue:
+            packet_Queue[], SeqNum = make_packet(packet_size, image, SeqNum)
+        '''
         if nextSeqNum == (base + N):
             time.sleep(0.001)
         if nextSeqNum > 0 and ack_timer.running() is False:
@@ -228,21 +236,25 @@ if __name__ == "__main__":
                 if nextSeqNum < len(packet_Queue):
                     if nextSeqNum == base:
                         ack_timer.start()
-                    clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
-                    print("Packet #", nextSeqNum, "sent")
+                    if nextSeqNum not in ack_Queue:
+                        clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
+                        print("Packet #", nextSeqNum, "sent")
                 if (base / len(packet_Queue)) >= 1:
                     final_handshake(base)
-                    ack_timer.stop()
-                    break
+                    ackPacket, trashdata = clientSocket.recvfrom(2048)
+                    # Parse the data
+                    NewSeqNum = ackPacket[:2]
+                    NewSeqNum = int.from_bytes(NewSeqNum, byteorder='big')
+                    if NewSeqNum == base:
+                        ack_timer.stop()
+                        break
             elif data_loss(data_loss_rate):
                 # Else if data_loss is True, the packet is "lost" en route to the server.
                 # Simulate by not sending the packet
                 print(base, "Data was lost!")
                 pass
 
-            nextSeqNum_lock.acquire()
             nextSeqNum += 1
-            nextSeqNum_lock.release()
 
 end2 = start2
 print("Total time for completion was %s" % (time.time() - start2))
