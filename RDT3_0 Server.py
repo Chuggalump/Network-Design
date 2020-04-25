@@ -1,4 +1,4 @@
-# Phase 5
+# Phase 6
 # Johnathan Saniuk, Amadeusz Piwowarczyk, Vishal Patel
 # Purpose: Receive an image packet by packet and put it into a new file called Picture.bmp
 # References: [1] J. Kurose and K. Ross, Computer Networking. Harlow, United Kingdom: Pearson Education Limited, 2017, pp. 159-164.
@@ -63,7 +63,7 @@ final_packet = 0
 received_Queue = {}
 
 dat_error = 0
-ack_loss_rate = 0
+ack_loss_rate = 10
 
 
 def make_checksum(packet):
