@@ -79,7 +79,7 @@ nextSeqNum = 0
 packet_Queue = {}
 # Create a dictionary to store ACKs
 ack_Queue = {}
-# Array of timers
+# Dictionary of timers
 timer_window = {}
 # Beginning of the window
 base = 0
@@ -125,9 +125,11 @@ def data_loss(test_num):
     rand_num = random.randrange(0, 100)
     # if randNum is less than the specified error rate, don't send packet
     if rand_num < test_num:
-        return True
+        loss = True
+        return loss
     else:
-        return False
+        loss = False
+        return loss
 
 
 def ack_corrupt():
@@ -176,21 +178,23 @@ def packet_catcher(client_socket):
             print("Corrupt Checksum")
         elif ack_corrupt():
             # Timeout to resend window
-            print("Corrupt ACK")
+            print("Corrupt ACK", NewSeqNum)
         elif NewSeqNum > expected_seq_num and serverChecksum == bitsum:
             ack_Queue[NewSeqNum] = True
             print("Out of order ACK", NewSeqNum, "received")
             if base > 20:
                 packet_Queue.pop((base - 20), None)
+            if timer_window[NewSeqNum % (N + 1)].running():
+                timer_window[NewSeqNum % (N + 1)].stop()
         elif NewSeqNum < expected_seq_num:
             # Duplicate ACK, continue on
             print("Duplicate ACK", NewSeqNum, "received")
-            if timer_window[NewSeqNum].running():
-                timer_window[NewSeqNum].stop()
+            if timer_window[NewSeqNum % (N + 1)].running():
+                timer_window[NewSeqNum % (N + 1)].stop()
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
             print("Proper ACK", NewSeqNum, "received")
-            if timer_window[NewSeqNum].running():
-                timer_window[NewSeqNum].stop()
+            if timer_window[NewSeqNum % (N + 1)].running():
+                timer_window[NewSeqNum % (N + 1)].stop()
             ack_Queue[base] = True
             while base in ack_Queue:
                 base_lock.acquire()
@@ -200,7 +204,6 @@ def packet_catcher(client_socket):
                 print("base =", base)
                 if base > 20:
                     packet_Queue.pop((base - 20), None)
-
 
         else:
             print("I done goofed")
@@ -217,6 +220,11 @@ if __name__ == "__main__":
 
     _thread.start_new_thread(packet_catcher, (clientSocket,))
 
+    for x in range(0, N + 1):
+        timer_window[x] = Timer(0.05)
+
+    print(timer_window)
+
     while 1:
         while (base + N + 20) not in packet_Queue and SeqNum <= (file_size / packet_size):
             sendPacket, SeqNum = make_packet(packet_size, image, SeqNum)
@@ -226,35 +234,33 @@ if __name__ == "__main__":
                 break
         if nextSeqNum == (base + N):
             time.sleep(0.001)
-        #if nextSeqNum > 0 and ack_timer.running() is False:
-            #ack_timer.start()
 
-        if nextSeqNum > 0:
-            for x in range(base, base + nextSeqNum):
-                if timer_window[x].timeout():
-                    print("Packet #", base, "timed out!")
-                    if timer_window[x].running():
-                        timer_window[x].stop()
-                    nextSeqNum = x
-                    break
+        for x in range(base, base + N):
+            if timer_window[x % (N + 1)].timeout():
+                print("Packet #", x, "timed out!")
+                if timer_window[x % (N + 1)].running():
+                    timer_window[x % (N + 1)].stop()
+                    data_loss_test = data_loss(data_loss_rate)
+                    if not data_loss_test and x < (file_size / packet_size):
+                        clientSocket.sendto(packet_Queue[x], (serverName, serverPort))
+                        print("Packet #", x, "resent")
+                        timer_window[x % (N + 1)].start()
+                    elif data_loss_test:
+                        print("Packet #", x, "lost again! Ya done goofed!")
+                        timer_window[x % (N + 1)].start()
 
-        if nextSeqNum <= (base + N) and base < (file_size / packet_size):
-            #if nextSeqNum == base:
-                #send_seq = packet_Queue[nextSeqNum]
-                #send_seq = send_seq[:2]
-                #ack_timer.start()
-
-            if not data_loss(data_loss_rate) and nextSeqNum not in ack_Queue and nextSeqNum < (file_size / packet_size):
+        if nextSeqNum < (base + N) and base < (file_size / packet_size):
+            data_loss_test = data_loss(data_loss_rate)
+            if not data_loss_test and nextSeqNum not in ack_Queue and nextSeqNum < (file_size / packet_size):
                 # If data_loss is false, packet is not lost. Send the packet
-                timer_window[nextSeqNum] = ack_timer.start()
+                timer_window[nextSeqNum % (N + 1)].start()
                 clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
                 print("Packet #", nextSeqNum, "sent")
                 nextSeqNum += 1
-            elif data_loss(data_loss_rate):
+            elif data_loss_test is True:
                 # Else if data_loss is True, the packet is "lost" en route to the server.
                 # Simulate by not sending the packet
-                timer_window[nextSeqNum] = ack_timer.start()
-                clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
+                timer_window[nextSeqNum % (N + 1)].start()
                 print(base, "Data was lost!")
                 nextSeqNum += 1
         elif base >= (file_size / packet_size):
@@ -264,8 +270,8 @@ if __name__ == "__main__":
             NewSeqNum = ackPacket[:2]
             NewSeqNum = int.from_bytes(NewSeqNum, byteorder='big')
             if NewSeqNum == base:
-                if timer_window[NewSeqNum].running():
-                    timer_window[NewSeqNum].stop()
+                if timer_window[NewSeqNum % (N + 1)].running():
+                    timer_window[NewSeqNum % (N + 1)].stop()
                 break
 
 end2 = start2
