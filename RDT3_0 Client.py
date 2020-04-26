@@ -181,10 +181,6 @@ def packet_catcher(client_socket):
             # Receive the ACK into the proper place in the dictionary
             ack_Queue[NewSeqNum] = True
             # print("Out of order ACK", NewSeqNum, "received")
-            # Clear out old unneeded entries in the Queues
-            if base > 20:
-                packet_Queue.pop((base - 20), None)
-                ack_Queue.pop((base - 20), None)
             # Stop the timer for this ACK if it's still running
             if timer_window[NewSeqNum % (N + 1)].running():
                 timer_window[NewSeqNum % (N + 1)].stop()
