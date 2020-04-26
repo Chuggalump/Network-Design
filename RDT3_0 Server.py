@@ -29,9 +29,9 @@ message, clientAddress = serverSocket.recvfrom(2048)
 # Receive packet from client just to have the return info to reply to the client
 
 # Receive the window size from Client
-N, trashAddress = serverSocket.recvfrom(2048)
+'''N, trashAddress = serverSocket.recvfrom(2048)
 N = int.from_bytes(N, byteorder='big')
-print("Window Size =", N)
+print("Window Size =", N)'''
 
 modifiedMessage = message.decode().upper()
 # Takes message from client after converting it to a string and uses upper() to capitalize it
@@ -63,7 +63,7 @@ final_packet = 0
 received_Queue = {}
 
 dat_error = 0
-ack_loss_rate = 10
+ack_loss_rate = 0
 
 
 def make_checksum(packet):
@@ -96,7 +96,7 @@ def data_error(data):
     # if randNum is less than the specified error rate,
     if randNum < dat_error:
         corrupted_data = bytearray()
-        #Throw some simple corruptor bits in here. Any 0's in the data will become 1's where there is a 1
+        # Throw some simple corruptor bits in here. Any 0's in the data will become 1's where there is a 1
         corruption = data[1022:]
         not_corrupt = data[:1022]
         corrupt = int.from_bytes(corruption, byteorder='little', signed=False)
@@ -124,12 +124,12 @@ def parser(rec_pack):
     # Convert Server-side checksum into bytes
     sbit_sum = server_checksum.to_bytes(2, byteorder='little')
 
+    # Clear the ack_packet
     ack_packet = bytearray()
     # Append the ACK to the packet
     ack_packet.extend(seq_num)
     seq_num = int.from_bytes(seq_num, byteorder='big')
     print('Packet received. Received SeqNum is:', seq_num)
-    print("ACK packet after Seq Num =", ack_packet)
     for i in sbit_sum:
         ack_packet.append(i)
 
@@ -158,12 +158,14 @@ while 1:
                 SNumber += 1
                 indexNumber += 1
                 print('Updated SeqNum is: ', SNumber)
+                # Clear out old unneeded data in the buffer
+                received_Queue.pop((SNumber - 20), None)
 
             # If last packet
             if len(dataPacket) < 1024:
                 final_packet = SNumber
-                print("final_packet -", final_packet)
 
+            # If final_packet flag is = to SNumber, we're really on the final packet. Trigger the final handshake
             if final_packet == SNumber:
                 final_handshake = True
 
@@ -184,16 +186,18 @@ while 1:
             # Checksum fail, drop packet and do nothing
             pass
     else:
-        print("It's the final COUNTDOWN! DO DO DOOO DOOOOOO!")
-        # Wait for the packet to come from the client
+        # We've entered the final handshake, wait to receive the last confirmation packet from the sender.
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
         SeqNum, clientChecksum, dataPacket, sbitsum, ackPacket = parser(recvPacket)
         if SeqNum == SNumber:
+            # Once the proper packet is received, send back the last ACK and leave
             ack_loss(ack_loss_rate)
             file.close()
             break
         else:
+            # If we get back something other than the final packet, send back an ACK with that sequence number
+            # until we get the packet we're looking for
             ack_loss(ack_loss_rate)
 
 
