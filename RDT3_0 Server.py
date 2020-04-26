@@ -7,7 +7,6 @@
 # Enable the creation of sockets
 from socket import *
 import array
-import sys
 import random
 import time
 
@@ -28,10 +27,6 @@ serverSocket.bind(("", serverPort))
 message, clientAddress = serverSocket.recvfrom(2048)
 # Receive packet from client just to have the return info to reply to the client
 
-# Receive the window size from Client
-'''N, trashAddress = serverSocket.recvfrom(2048)
-N = int.from_bytes(N, byteorder='big')
-print("Window Size =", N)'''
 
 modifiedMessage = message.decode().upper()
 # Takes message from client after converting it to a string and uses upper() to capitalize it
@@ -82,12 +77,12 @@ def ack_loss(test_num):
     rand_num = random.randrange(0, 100)
     if rand_num < test_num:
         # Packet is "lost". Simulate by not sending the ACK back to the client
-        print("ACK lost")
+        # print("ACK lost")
         pass
     else:
         # ACK packet isn't lost, send the ACK
         serverSocket.sendto(ackPacket, clientAddress)
-        print("ACK Sent")
+        # print("ACK Sent")
 
 
 def data_error(data):
@@ -129,7 +124,7 @@ def parser(rec_pack):
     # Append the ACK to the packet
     ack_packet.extend(seq_num)
     seq_num = int.from_bytes(seq_num, byteorder='big')
-    print('Packet received. Received SeqNum is:', seq_num)
+    # print('Packet received. Received SeqNum is:', seq_num)
     for i in sbit_sum:
         ack_packet.append(i)
 
@@ -154,10 +149,10 @@ while 1:
             # Download the data for all in order packets
             while SNumber in received_Queue:
                 file.write(received_Queue[SNumber])
-                print("Packet #", indexNumber, "Downloaded")
+                # print("Packet #", indexNumber, "Downloaded")
                 SNumber += 1
                 indexNumber += 1
-                print('Updated SeqNum is: ', SNumber)
+                # print('Updated SeqNum is: ', SNumber)
                 # Clear out old unneeded data in the buffer
                 received_Queue.pop((SNumber - 20), None)
 
@@ -192,7 +187,6 @@ while 1:
         SeqNum, clientChecksum, dataPacket, sbitsum, ackPacket = parser(recvPacket)
         if SeqNum == SNumber:
             # Once the proper packet is received, send back the last ACK and leave
-            ack_loss(ack_loss_rate)
             file.close()
             break
         else:
