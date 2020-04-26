@@ -1,4 +1,4 @@
-# Phase 5
+# Phase 6
 # Johnathan Saniuk, Amadeusz Piwowarczyk, Vishal Patel
 # Purpose: Send a file from client to server using checksum to find errors and resend the packet if an error has occurred
 # References: [1] J. Kurose and K. Ross, Computer Networking. Harlow, United Kingdom: Pearson Education Limited, 2017, pp. 159-164.
@@ -38,10 +38,10 @@ clientSocket.sendto(message.encode(), (serverName, serverPort))
 # We didn't need to specify port number of client because we want the system to do it automatically for us
 
 # Define Window Size (0 to N)
-N = 9
-N = N.to_bytes(1, byteorder='big')
+N = 49
+'''N = N.to_bytes(1, byteorder='big')
 clientSocket.sendto(N, (serverName, serverPort))
-N = int.from_bytes(N, byteorder='big')
+N = int.from_bytes(N, byteorder='big')'''
 
 modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
 # Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
@@ -66,7 +66,6 @@ print("packet size is:", packet_size)
 
 # Mutexes
 base_lock = _thread.allocate_lock()
-expected_lock = _thread.allocate_lock()
 
 # Variable to add the Sequence Number to each packet
 SeqNum = 0
@@ -143,6 +142,7 @@ def ack_corrupt():
 
 
 def final_handshake(da_base):
+    # Send the last base number to the server to check and see if the server is also on the last packet
     da_base = da_base.to_bytes(2, byteorder='big')
     final_packet = bytearray()
     for i in da_base:
@@ -180,35 +180,44 @@ def packet_catcher(client_socket):
             # Timeout to resend window
             print("Corrupt ACK", NewSeqNum)
         elif NewSeqNum > expected_seq_num and serverChecksum == bitsum:
+            # If NewSeqNum is greater than what we expect, it's an out of order ACK.
+            # Receive the ACK into the proper place in the dictionary
             ack_Queue[NewSeqNum] = True
             print("Out of order ACK", NewSeqNum, "received")
+            # Clear out old unneeded entries in the Queues
             if base > 20:
                 packet_Queue.pop((base - 20), None)
+                ack_Queue.pop((base - 20), None)
+            # Stop the timer for this ACK if it's still running
             if timer_window[NewSeqNum % (N + 1)].running():
                 timer_window[NewSeqNum % (N + 1)].stop()
         elif NewSeqNum < expected_seq_num:
-            # Duplicate ACK, continue on
+            # If NewSeqNum is less than what we're expecting, Duplicate ACK
+            # continue on and stop it's timer if it's running
             print("Duplicate ACK", NewSeqNum, "received")
             if timer_window[NewSeqNum % (N + 1)].running():
                 timer_window[NewSeqNum % (N + 1)].stop()
         elif NewSeqNum == expected_seq_num and serverChecksum == bitsum:
+            # Everything checks out, update base and expected, add ACK to dictionary, stop the timer
             print("Proper ACK", NewSeqNum, "received")
             if timer_window[NewSeqNum % (N + 1)].running():
                 timer_window[NewSeqNum % (N + 1)].stop()
             ack_Queue[base] = True
-            while base in ack_Queue:
-                base_lock.acquire()
-                base += 1
-                base_lock.release()
-                expected_seq_num = base
-                print("base =", base)
-                if base > 20:
-                    packet_Queue.pop((base - 20), None)
 
-        else:
-            print("I done goofed")
+        while base in ack_Queue:
+            # If the base exists in the ack_Queue, we can start shifting the window.
+            # Shift the window for every in order packet in the ack_Queue. Stop when you hit an unacked packet
+            base_lock.acquire()
+            base += 1
+            base_lock.release()
+            expected_seq_num = base
+            print("base =", base)
+            if base > 20:
+                packet_Queue.pop((base - 20), None)
+                ack_Queue.pop((base - 20), None)
 
         if base > (file_size / packet_size):
+            # Close the file and the thread if the last ACK is received
             image.close()
             _thread.exit()
 
@@ -218,58 +227,67 @@ start2 = time.time()
 if __name__ == "__main__":
     # Buffer the packets
 
+    # Start the ACK packet_cather thread
     _thread.start_new_thread(packet_catcher, (clientSocket,))
 
     for x in range(0, N + 1):
+        # Initialize a timer for each potential packet in the window
         timer_window[x] = Timer(0.05)
-
-    print(timer_window)
 
     while 1:
         while (base + N + 20) not in packet_Queue and SeqNum <= (file_size / packet_size):
+            # Make and buffer in new packets up to 20 packets above the current window max
             sendPacket, SeqNum = make_packet(packet_size, image, SeqNum)
             packet_Queue[SeqNum - 1] = sendPacket
             if len(sendPacket) < 1028:
                 print("Length of packet_Queue", len(packet_Queue))
                 break
         if nextSeqNum == (base + N):
+            # If the window is stuck waiting for an ACK, sleep the program for 1ms
+            # to keep from looping thousands of times unnecessarily
             time.sleep(0.001)
 
         for x in range(base, base + N):
+            # For each timer, check if it has timed out
             if timer_window[x % (N + 1)].timeout():
+                # If a timer has timed out, stop the timer (if it's still running) and resend the packet
                 print("Packet #", x, "timed out!")
                 if timer_window[x % (N + 1)].running():
                     timer_window[x % (N + 1)].stop()
                     data_loss_test = data_loss(data_loss_rate)
                     if not data_loss_test and x < (file_size / packet_size):
+                        # Run the data loss function before sending
                         clientSocket.sendto(packet_Queue[x], (serverName, serverPort))
                         print("Packet #", x, "resent")
                         timer_window[x % (N + 1)].start()
                     elif data_loss_test:
+                        # If data is lost start the timer anyway, we don't know if it's been sent or not
                         print("Packet #", x, "lost again! Ya done goofed!")
                         timer_window[x % (N + 1)].start()
 
         if nextSeqNum < (base + N) and base < (file_size / packet_size):
             data_loss_test = data_loss(data_loss_rate)
             if not data_loss_test and nextSeqNum not in ack_Queue and nextSeqNum < (file_size / packet_size):
-                # If data_loss is false, packet is not lost. Send the packet
-                timer_window[nextSeqNum % (N + 1)].start()
+                # If data_loss is false, packet is not lost. Start the timer and send the packet
+                # Also check to see if nextSeqNum has not been ACKed, and if it's within the total packets in the file
                 clientSocket.sendto(packet_Queue[nextSeqNum], (serverName, serverPort))
                 print("Packet #", nextSeqNum, "sent")
-                nextSeqNum += 1
             elif data_loss_test is True:
                 # Else if data_loss is True, the packet is "lost" en route to the server.
-                # Simulate by not sending the packet
-                timer_window[nextSeqNum % (N + 1)].start()
+                # Simulate by not sending the packet but starting the timer anyway
                 print(base, "Data was lost!")
-                nextSeqNum += 1
+            # Update nextSeqNum so that the next packet can be sent on the next loop
+            timer_window[nextSeqNum % (N + 1)].start()
+            nextSeqNum += 1
         elif base >= (file_size / packet_size):
+            # At the end of the file, start the final handshake process
             final_handshake(base)
             ackPacket, trashdata = clientSocket.recvfrom(2048)
             # Parse the data
             NewSeqNum = ackPacket[:2]
             NewSeqNum = int.from_bytes(NewSeqNum, byteorder='big')
             if NewSeqNum == base:
+                # Received ACK is the final hanshake with the server. Stop the timer and exit the program.
                 if timer_window[NewSeqNum % (N + 1)].running():
                     timer_window[NewSeqNum % (N + 1)].stop()
                 break
