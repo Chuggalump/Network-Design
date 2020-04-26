@@ -57,13 +57,11 @@ file_size = os.stat(FileName).st_size
 
 # Set the packet size and create an index to count packets
 packet_size = 1024
-packetIndex = 0
 print("packet size is:", packet_size)
 
 # Mutexes
 base_lock = _thread.allocate_lock()
 packet_Queue_lock = _thread.allocate_lock()
-ack_Queue_lock = _thread.allocate_lock()
 
 # Variable to add the Sequence Number to each packet
 SeqNum = 0
@@ -215,9 +213,7 @@ def packet_catcher(client_socket):
                 packet_Queue_lock.acquire()
                 packet_Queue.pop((base - N), None)
                 packet_Queue_lock.release()
-                ack_Queue_lock.acquire()
                 ack_Queue.pop((base - N), None)
-                ack_Queue_lock.release()
 
         if base > (file_size / packet_size):
             # Close the file and the thread if the last ACK is received
