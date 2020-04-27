@@ -18,26 +18,30 @@ import os
 from typing import Any, Tuple
 
 # start_time = time.time()
-serverName = '192.168.1.105'  # input('Please write your IPv4 IP here: ')
-'''   '192.168.1.239'   '''
-'''   '192.168.1.105'   '''
+serverName = input('Please enter your IPv4 IP here: ')
 serverPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
 clientSocket = socket(AF_INET, SOCK_DGRAM)
-print("clientSocket:", clientSocket)
+
+# Ask user to enter window size, window size defines number of packets sent at a single time (sliding window if prop ack received)
+N = int(input('Enter window size for packet transfer: '))
+
+# *********************** Ask sender to input simulation Error/Loss during transfer
+print("Enter Error/Loss below. If no Error/Loss, enter a '0' \n")
+ack_error = int(input('Enter ACK Error percent for packet transfer: '))
+data_loss_rate = int(input('Enter Data Loss percent for packet transfer: '))
+
+print("\nWaiting for server....................\n")
 
 # *********************** Send client a question to know when files are ready to be sent over
-message = ('Enter File Name to transfer file!')
+message = 'Enter File Name to transfer file!'
 # waits for client to input a message and then message is stored in the "message" variable
 
 clientSocket.sendto(message.encode(), (serverName, serverPort))
 # Convert the string message to byte type as we can only send bytes into a socket, done using encode()
 # sendto() attaches destination address to message and sends resulting packet into the process's socket (clientSocket)
 # We didn't need to specify port number of client because we want the system to do it automatically for us
-
-# Define Window Size (0 to N)
-N = 49
 
 modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
 # Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
@@ -51,13 +55,14 @@ print(modifiedMessage.decode().upper())
 
 
 # Store selected image into a variable
-FileName = 'picture.bmp'  # input('Write the file name you wish to send: ')
+FileName = input('Write the file name you wish to send: ')
 image = open(FileName, 'rb')
+print("\nFile is being transfered . . .")
 file_size = os.stat(FileName).st_size
 
 # Set the packet size and create an index to count packets
 packet_size = 1024
-print("packet size is:", packet_size)
+# print("packet size is:", packet_size)
 
 # Mutexes
 base_lock = _thread.allocate_lock()
@@ -79,9 +84,6 @@ timer_window = {}
 base = 0
 # Instantiate Timer
 ack_timer = Timer(0.05)
-
-ack_error = 0
-data_loss_rate = 0
 
 
 # Define a make packet function that outputs a packet and an index number
