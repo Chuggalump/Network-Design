@@ -7,7 +7,6 @@
 # Enable the creation of sockets
 from socket import *
 import array
-import sys
 import random
 import time
 
@@ -34,17 +33,25 @@ modifiedMessage = message.decode().upper()
 print(modifiedMessage)  # Print received message to server's command line
 
 # PauseInput = input('Press Enter to Continue:')
-FileName = 'Pic.bmp'#input('File followed by ".filetype": ')
+FileName = input('File name followed by ".filetype": ')
 
-message2 = "Ready to receive file"  # tell server that you are ready to receive file transfer
+print("\nEnter Error/Loss below. If no Error/Loss, enter a '0' ")
+
+# Ask user to input Eror/Loss simulation for packet transfer
+dat_error = int(input('Enter Data Error percent for packet transfer: '))
+ack_loss_rate = int(input('Enter ACK Loss percent for packet transfer: '))
+
+print("\nReady to download file ...")
+
+print("\nWaiting for client to send packets . . . .\n")
+
+message2 = "Sender is ready to receive packets . . ."  # tell server that you are ready to receive file transfer
 serverSocket.sendto(message2.encode(), clientAddress)
-start_time = time.time()
 
 # ***********************
 
 SNumber = 0
 file = open(FileName, 'wb')
-print("Ready to download file ...")
 ackPacket = bytearray()
 recvPacket = bytearray()
 final_handshake = False
@@ -54,9 +61,6 @@ base = 0
 final_packet = 0
 
 received_Queue = {}
-
-dat_error = 10
-ack_loss_rate = 10
 
 
 def make_checksum(packet):
@@ -129,6 +133,8 @@ def parser(rec_pack):
     return seq_num, client_checksum, data_packet, sbit_sum, ack_packet
 
 
+start_time = time.time()
+
 while 1:
     if not final_handshake:
         # Wait for the packet to come from the client
@@ -184,7 +190,6 @@ while 1:
         SeqNum, clientChecksum, dataPacket, sbitsum, ackPacket = parser(recvPacket)
         if SeqNum == SNumber:
             # Once the proper packet is received, send back the last ACK and leave
-            ack_loss(ack_loss_rate)
             file.close()
             break
         else:
