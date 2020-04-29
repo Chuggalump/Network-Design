@@ -150,7 +150,7 @@ def packet_catcher(client_socket):
         # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
 
         if ack_timer.timeout():
-            expected_seq_num = base + N
+            expected_seq_num = base
             print("expected seq num is now:", expected_seq_num)
 
         # trasdata is the address sent with the ACK. We don't need it
