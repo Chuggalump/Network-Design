@@ -74,7 +74,7 @@ def make_checksum(packet):
     return (~res) & 0xffff
 
 
-def ack_loss(test_num):
+def ack_loss(test_num, ack_packet):
     # Select a random int btwn 0 and 100
     rand_num = random.randrange(0, 100)
     if rand_num < test_num:
@@ -83,7 +83,7 @@ def ack_loss(test_num):
         pass
     else:
         # ACK packet isn't lost, send the ACK
-        serverSocket.sendto(ackPacket, clientAddress)
+        serverSocket.sendto(ack_packet, clientAddress)
         print("ACK Sent")
 
 
@@ -146,20 +146,23 @@ def parser(rec_pack):
 
 
 def ackpack_creator(sbit_sum, seq_num, source_port, dest_port):
-    ACK_Number = b'\x00\x00'
+    ACK_Number = b'\x00\x00\x00\x00'
     head_len = b'\x00'
-    not_used = b'\x00'
-    CWR = 0
-    ECE = 0
-    Urgent = 0
-    ACK_valid = 0
-    Push_data = 0
-    RST = 0
-    SYN = 0
-    FIN = 0
-    Rec_window = b'\x00'
-    Urg_Data = b'\x00'
-    Options = b'\x00\x00'
+    flag_byte = 0x00
+    flag_byte = flag_byte | 0x10
+    '''
+    CWR = 10000000
+    ECE = 010000000
+    Urgent = 00100000
+    ACK_valid = 00010000
+    Push_data = 00001000
+    RST = 00000100
+    SYN = 00000010
+    FIN = 00000001
+    '''
+    Rec_window = b'\x00\x00'
+    Urg_Data = b'\x00\x00'
+    Options = b'\x00\x00\x00\x00'
 
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # Clear the ack_packet
@@ -174,16 +177,7 @@ def ackpack_creator(sbit_sum, seq_num, source_port, dest_port):
         ack_packet.append(d)
     for e in head_len:
         ack_packet.append(e)
-    for f in not_used:
-        ack_packet.append(f)
-    ack_packet.append(CWR)
-    ack_packet.append(ECE)
-    ack_packet.append(Urgent)
-    ack_packet.append(ACK_valid)
-    ack_packet.append(Push_data)
-    ack_packet.append(RST)
-    ack_packet.append(SYN)
-    ack_packet.append(FIN)
+    ack_packet.append(flag_byte)
     for g in Rec_window:
         ack_packet.append(g)
     for h in sbit_sum:
@@ -209,7 +203,7 @@ while 1:
         # If checksums the same and SeqNum is what we expect, everything is right with the world
         if sbitsum == clientChecksum and SeqNum == SNumber:
             # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate)
+            ack_loss(ack_loss_rate, ackPacket)
 
             # SeqNum is correct, buffer data to the Queue
             received_Queue[SeqNum] = dataPacket
@@ -234,7 +228,7 @@ while 1:
         # If packet is good but out of order
         elif sbitsum == clientChecksum and SeqNum > SNumber:
             # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate)
+            ack_loss(ack_loss_rate, ackPacket)
             # SeqNum is out of order but still good, buffer data to the Queue
             received_Queue[SeqNum] = dataPacket
             # If last packet, close the file
@@ -243,11 +237,12 @@ while 1:
         # If packet is a duplicate
         elif SeqNum < SNumber:
             # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate)
+            ack_loss(ack_loss_rate, ackPacket)
         else:
             # Checksum fail, drop packet and do nothing
             pass
     else:
+        print("Final Countdown")
         # We've entered the final handshake, wait to receive the last confirmation packet from the sender.
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
@@ -259,7 +254,7 @@ while 1:
         else:
             # If we get back something other than the final packet, send back an ACK with that sequence number
             # until we get the packet we're looking for
-            ack_loss(ack_loss_rate)
+            ack_loss(ack_loss_rate, ackPacket)
 
 
 end_time = start_time
