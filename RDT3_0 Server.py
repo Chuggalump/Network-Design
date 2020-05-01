@@ -211,11 +211,12 @@ while 1:
             # Download the data for all in order packets
             while SNumber in received_Queue:
                 file.write(received_Queue[SNumber])
-                print("Packet #", SNumber, "Downloaded")
-                SNumber += 1
+                print("Segment #", SNumber, "Downloaded")
+    ########## Pay attention once you start changing header size ##########
+                SNumber += len(received_Queue[SNumber])
                 print('Updated SeqNum is: ', SNumber)
                 # Clear out old unneeded data in the buffer
-                received_Queue.pop((SNumber - 20), None)
+                #received_Queue.pop((SNumber - 20), None)
 
             # If last packet
             if len(dataPacket) < 1024:
@@ -233,7 +234,7 @@ while 1:
             received_Queue[SeqNum] = dataPacket
             # If last packet, close the file
             if len(dataPacket) < 1024:
-                final_packet = SeqNum + 1
+                final_packet = SeqNum + len(dataPacket)
         # If packet is a duplicate
         elif SeqNum < SNumber:
             # Send the ACK packet back to sender, calculating if there's loss or not
