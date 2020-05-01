@@ -18,9 +18,8 @@ import os
 from typing import Any, Tuple
 
 # start_time = time.time()
-serverName = '192.168.1.105'   # input('Please enter your IPv4 IP here: ')
+serverName = '192.168.1.239'   # input('Please enter your IPv4 IP here: ')
 # '192.168.1.105'
-global serverPort
 serverPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
@@ -87,78 +86,85 @@ timer_window = {}
 base = 0
 # Instantiate Timer
 ack_timer = Timer(0.05)
+final_flag = False
 
 
-# Define a make packet function that outputs a packet and an index number
-def make_packet(csize, file_name, seq_num):
-    packet = file_name.read(csize)
+def make_header(csize, file_name, seq_num):
+    global final_flag
+    packet = 0
+    if not final_flag:
+        packet = file_name.read(csize)
 
-    # Make the checksum and convert it to bytes so it can be appended to the packet
-    if len(packet) % 2 != 0:
-        packet += b'\0'
+        # Make the checksum and convert it to bytes so it can be appended to the packet
+        if len(packet) % 2 != 0:
+            packet += b'\0'
 
-    res = sum(array.array("H", packet))
-    res = (res >> 16) + (res & 0xffff)
-    res += res >> 16
+        res = sum(array.array("H", packet))
+        res = (res >> 16) + (res & 0xffff)
+        res += res >> 16
 
-    checksum = (~res) & 0xffff
-    bit_sum = checksum.to_bytes(2, byteorder='little')
+        checksum = (~res) & 0xffff
+        bit_sum = checksum.to_bytes(2, byteorder='little')
+    else:
+        bit_sum = b'\x00\x00'
+
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # print("Seq Num of packet is:", seq_num)
     source_port = serverPort.to_bytes(2, byteorder='little')
     dest_port = 12000
     dest_port = dest_port.to_bytes(2, byteorder='little')
-    ACK_Number = b'\x00\x00'
+    ACK_Number = b'\x00\x00\x00\x00'
     head_len = b'\x00'
-    not_used = b'\x00'
-    CWR = 0
-    ECE = 0
-    Urgent = 0
-    ACK_valid = 0
-    Push_data = 0
-    RST = 0
-    SYN = 0
-    FIN = 0
-    Rec_window = b'\x00'
-    Urg_Data = b'\x00'
-    Options = b'\x00\x00'
+    flag_byte = 0x00
+    flag_byte = flag_byte | 0x10
+    '''
+    CWR = 10000000
+    ECE = 010000000
+    Urgent = 00100000
+    ACK_valid = 00010000
+    Push_data = 00001000
+    RST = 00000100
+    SYN = 00000010
+    FIN = 00000001
+    '''
+    Rec_window = b'\x00\x00'
+    Urg_Data = b'\x00\x00'
+    Options = b'\x00\x00\x00\x00'
     # Create the sendPacket by appending sequence number, checksum, and data
-    send_packet = bytearray()
+    header_packet = bytearray()
     for a in source_port:
-        send_packet.append(a)
+        header_packet.append(a)
     for b in dest_port:
-        send_packet.append(b)
+        header_packet.append(b)
     for c in seq_num:
-        send_packet.append(c)
+        header_packet.append(c)
     for d in ACK_Number:
-        send_packet.append(d)
+        header_packet.append(d)
     for e in head_len:
-        send_packet.append(e)
-    for f in not_used:
-        send_packet.append(f)
-    send_packet.append(CWR)
-    send_packet.append(ECE)
-    send_packet.append(Urgent)
-    send_packet.append(ACK_valid)
-    send_packet.append(Push_data)
-    send_packet.append(RST)
-    send_packet.append(SYN)
-    send_packet.append(FIN)
+        header_packet.append(e)
+    header_packet.append(flag_byte)
     for g in Rec_window:
-        send_packet.append(g)
+        header_packet.append(g)
     for h in bit_sum:
-        send_packet.append(h)
+        header_packet.append(h)
     for i in Urg_Data:
-        send_packet.append(i)
+        header_packet.append(i)
     for j in Options:
-        send_packet.append(j)
-    for k in packet:
+        header_packet.append(j)
+
+    return header_packet, packet
+
+
+# Define a make packet function that outputs a packet and an index number
+def make_packet(csize, file_name, seq_num):
+
+    send_packet, data_packet = make_header(csize, file_name, seq_num)
+
+    for k in data_packet:
         send_packet.append(k)
 
-    seq_num = int.from_bytes(seq_num, byteorder='big')
     print("Seq Number is:", seq_num)
     seq_num += 1
-
 
     return send_packet, seq_num
 
@@ -185,18 +191,9 @@ def ack_corrupt():
         return False
 
 
-def final_handshake(da_base):
-    # Send the last base number to the server to check and see if the server is also on the last packet
-    da_base = da_base.to_bytes(2, byteorder='big')
-    final_packet = bytearray()
-    for i in da_base:
-        final_packet.append(i)
-    clientSocket.sendto(final_packet, (serverName, serverPort))
-    print("Final packet sent")
-
-
 def packet_catcher(client_socket):
     global base
+    global final_flag
     # Variable to track the expected Sequence Number we receive from the Server
     expected_seq_num = 0
     while 1:
@@ -264,6 +261,7 @@ def packet_catcher(client_socket):
 
         if base > (file_size / packet_size):
             # Close the file and the thread if the last ACK is received
+            final_flag = True
             image.close()
             _thread.exit()
 
@@ -330,7 +328,9 @@ if __name__ == "__main__":
             nextSeqNum += 1
         elif base >= (file_size / packet_size):
             # At the end of the file, start the final handshake process
-            final_handshake(base)
+            final_packet, data_packet = make_header(packet_size, image, SeqNum)
+            clientSocket.sendto(final_packet, (serverName, serverPort))
+            print("Final packet sent")
             break
 
 
