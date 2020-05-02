@@ -39,7 +39,7 @@ FileName = 'Pic.bmp'    # input('File name followed by ".filetype": ')
 
 # Ask user to input Eror/Loss simulation for packet transfer
 dat_error = 0    # int(input('Enter Data Error percent for packet transfer: '))
-ack_loss_rate = 0    # int(input('Enter ACK Loss percent for packet transfer: '))
+ack_loss_rate = 50    # int(input('Enter ACK Loss percent for packet transfer: '))
 
 # print("\nReady to download file ...")
 
@@ -50,6 +50,7 @@ serverSocket.sendto(message2.encode(), clientAddress)
 
 # ***********************
 
+MSS = 1024
 SNumber = 0
 file = open(FileName, 'wb')
 ackPacket = bytearray()
@@ -57,6 +58,7 @@ recvPacket = bytearray()
 final_handshake = False
 # Base of the buffering Dictionary
 base = 0
+old_SNumber = 0
 
 final_packet = 0
 
@@ -103,6 +105,7 @@ def data_error(data):
             corrupted_data.append(i)
         for j in corrupt:
             corrupted_data.append(j)
+        print("Corrupted Data")
         return corrupted_data
     else:
         return data
@@ -198,13 +201,9 @@ while 1:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
         SeqNum, clientChecksum, dataPacket, sbitsum, clientPort = parser(recvPacket)
-        ackPacket = ackpack_creator(sbitsum, SeqNum, serverPort, clientPort)
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
         if sbitsum == clientChecksum and SeqNum == SNumber:
-            # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate, ackPacket)
-
             # SeqNum is correct, buffer data to the Queue
             received_Queue[SeqNum] = dataPacket
 
@@ -212,11 +211,20 @@ while 1:
             while SNumber in received_Queue:
                 file.write(received_Queue[SNumber])
                 print("Segment #", SNumber, "Downloaded")
-    ########## Pay attention once you start changing header size ##########
+    ########## Pay attention once we start changing header size ##########
+                old_SNumber = SNumber
                 SNumber += len(received_Queue[SNumber])
-                print('Updated SeqNum is: ', SNumber)
+                print('Updated SNumber is: ', SNumber)
                 # Clear out old unneeded data in the buffer
                 #received_Queue.pop((SNumber - 20), None)
+
+            send_bitsum = make_checksum(received_Queue[old_SNumber])
+            send_bitsum = send_bitsum.to_bytes(2, byteorder='little')
+            print("send_bitsum =", send_bitsum)
+            # Make the ACK Segment
+            ackPacket = ackpack_creator(send_bitsum, old_SNumber, serverPort, clientPort)
+            # Send the ACK Segment back to sender, calculating if there's loss or not
+            ack_loss(ack_loss_rate, ackPacket)
 
             # If last packet
             if len(dataPacket) < 1024:
@@ -235,10 +243,6 @@ while 1:
             # If last packet, close the file
             if len(dataPacket) < 1024:
                 final_packet = SeqNum + len(dataPacket)
-        # If packet is a duplicate
-        elif SeqNum < SNumber:
-            # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate, ackPacket)
         else:
             # Checksum fail, drop packet and do nothing
             pass
