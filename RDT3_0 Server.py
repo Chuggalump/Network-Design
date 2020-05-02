@@ -38,7 +38,7 @@ FileName = 'Pic.bmp'    # input('File name followed by ".filetype": ')
 # print("\nEnter Error/Loss below. If no Error/Loss, enter a '0' ")
 
 # Ask user to input Eror/Loss simulation for packet transfer
-dat_error = 0    # int(input('Enter Data Error percent for packet transfer: '))
+dat_error = 5    # int(input('Enter Data Error percent for packet transfer: '))
 ack_loss_rate = 0    # int(input('Enter ACK Loss percent for packet transfer: '))
 
 # print("\nReady to download file ...")
@@ -103,6 +103,7 @@ def data_error(data):
             corrupted_data.append(i)
         for j in corrupt:
             corrupted_data.append(j)
+        print("Corrupted Data")
         return corrupted_data
     else:
         return data
@@ -198,11 +199,12 @@ while 1:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
         SeqNum, clientChecksum, dataPacket, sbitsum, clientPort = parser(recvPacket)
-        ackPacket = ackpack_creator(sbitsum, SeqNum, serverPort, clientPort)
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
         if sbitsum == clientChecksum and SeqNum == SNumber:
-            # Send the ACK packet back to sender, calculating if there's loss or not
+            # Make the ACK Segment
+            ackPacket = ackpack_creator(sbitsum, SeqNum, serverPort, clientPort)
+            # Send the ACK Segment back to sender, calculating if there's loss or not
             ack_loss(ack_loss_rate, ackPacket)
 
             # SeqNum is correct, buffer data to the Queue
@@ -212,7 +214,7 @@ while 1:
             while SNumber in received_Queue:
                 file.write(received_Queue[SNumber])
                 print("Segment #", SNumber, "Downloaded")
-    ########## Pay attention once you start changing header size ##########
+    ########## Pay attention once we start changing header size ##########
                 SNumber += len(received_Queue[SNumber])
                 print('Updated SeqNum is: ', SNumber)
                 # Clear out old unneeded data in the buffer
@@ -235,10 +237,6 @@ while 1:
             # If last packet, close the file
             if len(dataPacket) < 1024:
                 final_packet = SeqNum + len(dataPacket)
-        # If packet is a duplicate
-        elif SeqNum < SNumber:
-            # Send the ACK packet back to sender, calculating if there's loss or not
-            ack_loss(ack_loss_rate, ackPacket)
         else:
             # Checksum fail, drop packet and do nothing
             pass
