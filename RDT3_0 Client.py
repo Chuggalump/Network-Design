@@ -41,12 +41,9 @@ image = open(FileName, 'rb')
 # print("\nFile is being transfered . . .")
 file_size = os.stat(FileName).st_size
 
-# Set the packet size and create an index to count packets
-packet_size = 1024
-# print("packet size is:", packet_size)
-
-Sequ_Num = random.randrange(10, 500, 5)
-print('Binary Sequ_Num =', Sequ_Num)
+# Initial Seq Number after coin flip
+initialSeqNum = random.randrange(10, 500, 5)
+print('Binary initialSeqNum =', initialSeqNum)
 
 '''
 # print("\nWaiting for server....................\n")
@@ -80,8 +77,6 @@ print_lock = _thread.allocate_lock()
 MSS = 1024
 # Variable to add the Sequence Number to each packet
 SeqNum = 0
-# Initial Seq Number after coin flip
-initialSeqNum = 0
 sendPacket = bytearray()
 bitsum = 0
 # Variable to track which packet in the queue we're on
@@ -100,13 +95,13 @@ final_flag = False
 handshake_set_fin = True
 
 
-def header_maker(seq_num, bit_sum, flag):
+def header_maker(seq_num, bit_sum, flag, des_port, ack_num):
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # print("Seq Num of packet is:", seq_num)
     source_port = serverPort.to_bytes(2, byteorder='little')
-    dest_port = 12000
+    dest_port = des_port
     dest_port = dest_port.to_bytes(2, byteorder='little')
-    ACK_Number = b'\x00\x00\x00\x00'
+    ACK_Number = ack_num
     head_len = b'\x00'
     flag_byte = 0x00
     flag_byte = flag_byte | flag
@@ -148,47 +143,53 @@ def header_maker(seq_num, bit_sum, flag):
     return header_packet
 
 
-def make_header(csize, file_name, seq_num):
+def make_header(csize, file_name, seq_num, des_port, ack_numb):
     global final_flag
     global handshake_set_fin
+    start = True
     packet = 0
     end = 0
-    if not final_flag:
-        packet = file_name.read(csize)
+    bit_sum = b'\x00\x00'
+    dest_port = des_port
+    ack_num = ack_numb
+    if not start:
+        if not final_flag:
+            packet = file_name.read(csize)
 
-        # Make the checksum and convert it to bytes so it can be appended to the packet
-        if len(packet) % 2 != 0:
-            packet += b'\0'
+            # Make the checksum and convert it to bytes so it can be appended to the packet
+            if len(packet) % 2 != 0:
+                packet += b'\0'
 
-        res = sum(array.array("H", packet))
-        res = (res >> 16) + (res & 0xffff)
-        res += res >> 16
+            res = sum(array.array("H", packet))
+            res = (res >> 16) + (res & 0xffff)
+            res += res >> 16
 
-        checksum = (~res) & 0xffff
-        bit_sum = checksum.to_bytes(2, byteorder='little')
-    else:
-        bit_sum = b'\x00\x00'
-        flag = 0x00
-        handshake_set_fin = True
-        end = 1
+            checksum = (~res) & 0xffff
+            bit_sum = checksum.to_bytes(2, byteorder='little')
+        else:
+            bit_sum = b'\x00\x00'
+            flag = 0x00
+            handshake_set_fin = True
+            end = 1
+
+    elif start == 0:
+        start = False
 
     # if handshake false, send segments
     if not handshake_set_fin:
         flag = 0x00
-        header_packet = header_maker(seq_num, bit_sum, flag)
+        header_packet = header_maker(seq_num, bit_sum, flag, dest_port, ack_num)
 
     # if handshake true and segment is at the end
     elif handshake_set_fin and end == 1:
         flag = 0x01
-        header_packet = header_maker(seq_num, bit_sum, flag)
+        header_packet = header_maker(seq_num, bit_sum, flag, dest_port, ack_num)
 
     # if handshake true and we are initializing communication with receiver
     else:
         flag = 0x02
-        header_packet = header_maker(seq_num, bit_sum, flag)
+        header_packet = header_maker(seq_num, bit_sum, flag, dest_port, ack_num)
         handshake_set_fin = False
-
-
 
     # print("header_packet =", header_packet)
     return header_packet, packet
@@ -226,6 +227,31 @@ def ack_corrupt():
     else:
         return False
 
+
+def parser(rec_pack):
+    # Parse data from TCP Segment
+    source_port = rec_pack[:2]
+    clientPort = source_port
+    des_port = rec_pack[2:4]
+    seq_num = rec_pack[4:8]
+    ack_number = rec_pack[8:12]
+    Header_N_unused = rec_pack[12:13]
+    Header_Bit_setting = rec_pack[13:14]
+    Header_Bit_setting = int.from_bytes(Header_Bit_setting, byteorder='little')
+    CWR = (Header_Bit_setting >> 7) & 0x01
+    ECE = (Header_Bit_setting >> 6) & 0x01
+    Urgent = (Header_Bit_setting >> 5) & 0x01
+    ACK_valid = (Header_Bit_setting >> 4) & 0x01
+    Push_data = (Header_Bit_setting >> 3) & 0x01
+    RST = (Header_Bit_setting >> 2) & 0x01
+    SYN = (Header_Bit_setting >> 1) & 0x01
+    FIN = (Header_Bit_setting >> 0) & 0x01
+    Rec_Window = rec_pack[14:16]
+    client_checksum = rec_pack[16:18]
+    Urgent_data = rec_pack[18:20]
+    Options = rec_pack[20:24]
+
+    return seq_num, des_port, ack_number, SYN, FIN
 
 def packet_catcher(client_socket):
     global base
@@ -354,10 +380,33 @@ def packet_catcher(client_socket):
             _thread.exit()
 
 
+# Initial handshake set up
 # *************************************************************
 # take our old way of communicating and replace with a handshake set up
-message = make_header(file_size, image, Sequ_Num)
-clientSocket.sendto()
+dest_port = b'\x00\x00'
+Ack_num = b'\x00\x00\x00\x00'
+message, packet = make_header(MSS, image, initialSeqNum, dest_port, Ack_num)
+clientSocket.sendto(message, (serverName, serverPort))
+
+modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
+# Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
+# serverAddress contains both the server's IP and server's port number
+# recvfrom takes the buffer size of 2048 as an input and this size is suitable for most purposes
+
+Rec_Sequ_Num, dest_port, Ack_num, SYN, FIN = parser(modifiedMessage)
+Rec_Sequ_Num = int.from_bytes(Rec_Sequ_Num, byteorder='little')
+Ack_num = Rec_Sequ_Num + 1
+Ack_num = Ack_num.to_bytes(4, byteorder='little')
+if SYN == 1:
+    SYN = 0
+else:
+    print('Ya done goooofed!!!')
+
+message, packet = make_header(MSS, image, initialSeqNum, dest_port, Ack_num)
+send_mss = MSS.to_bytes(2, byteorder='little')
+for z in send_mss:
+    message.append(z)
+clientSocket.sendto(message, (serverName, serverPort))
 # *************************************************************
 
 
@@ -379,7 +428,7 @@ if __name__ == "__main__":
     while 1:
         while (base + ((N + 20) * MSS)) not in packet_Queue and SeqNum < (file_size + initialSeqNum):
             # Make and buffer in new packets up to 20 packets above the current window max
-            sendPacket, data_length = make_packet(packet_size, image, SeqNum)
+            sendPacket, data_length = make_packet(MSS, image, SeqNum)
             packet_Queue_lock.acquire()
             packet_Queue[SeqNum] = sendPacket
             packet_Queue_lock.release()
@@ -458,7 +507,7 @@ if __name__ == "__main__":
         # We will need to change this to base >= (file_size + initial SeqNum)
         elif base >= (file_size + initialSeqNum):
             # At the end of the file, start the final handshake process
-            final_packet, data_packet = make_header(packet_size, image, SeqNum)
+            final_packet, data_packet = make_header(MSS, image, SeqNum)
             clientSocket.sendto(final_packet, (serverName, serverPort))
             print_lock.acquire()
             print("Final packet sent")
