@@ -29,7 +29,7 @@ FileName = 'Pic.bmp'    # input('File name followed by ".filetype": ')
 
 # Ask user to input Eror/Loss simulation for packet transfer
 dat_error = 0    # int(input('Enter Data Error percent for packet transfer: '))
-ack_loss_rate = 50    # int(input('Enter ACK Loss percent for packet transfer: '))
+ack_loss_rate = 0    # int(input('Enter ACK Loss percent for packet transfer: '))
 
 
 # print("\nReady to download file ...")
@@ -104,9 +104,8 @@ def data_error(data):
 
 def parser(rec_pack):
     # Parse data from TCP Segment
-    source_port = rec_pack[:2]
-    clientPort = source_port
-    des_port = rec_pack[2:4]
+    client_port = rec_pack[:2]
+    server_port = rec_pack[2:4]
     seq_num = rec_pack[4:8]
     ack_number = rec_pack[8:12]
     Header_N_unused = rec_pack[12:13]
@@ -134,13 +133,13 @@ def parser(rec_pack):
     sbit_sum = server_checksum.to_bytes(2, byteorder='little')
 
     seq_num = int.from_bytes(seq_num, byteorder='big')
+    ack_number = int.from_bytes(ack_number, byteorder='big')
     print('Packet received. Received SeqNum is:', seq_num)
+    print('Received ack_number is:', ack_number)
 
-    return seq_num, client_checksum, data_packet, sbit_sum, clientPort
+    return seq_num, ack_number, client_checksum, data_packet, sbit_sum, client_port, server_port, SYN, FIN
 
-
-def ackpack_creator(sbit_sum, seq_num, source_port, dest_port):
-    ACK_Number = b'\x00\x00\x00\x00'
+def ackpack_creator(sbit_sum, seq_num, ACK_Number, client_port, server_port):
     head_len = b'\x00'
     flag_byte = 0x00
     flag_byte = flag_byte | 0x10
@@ -158,12 +157,15 @@ def ackpack_creator(sbit_sum, seq_num, source_port, dest_port):
     Urg_Data = b'\x00\x00'
     Options = b'\x00\x00\x00\x00'
 
+    ACK_Number = ACK_Number.to_bytes(4, byteorder='big')
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # Clear the ack_packet
     ack_packet = bytearray()
-    for a in dest_port:
+###****************************************************************###
+    ##Will Need to change dest_port to source_port at some point##
+    for a in server_port:
         ack_packet.append(a)
-    for b in dest_port:
+    for b in client_port:
         ack_packet.append(b)
     for c in seq_num:
         ack_packet.append(c)
@@ -183,16 +185,30 @@ def ackpack_creator(sbit_sum, seq_num, source_port, dest_port):
 
     return ack_packet
 
+
 # ************** Receive starter message that tells client when server is accepting file transfer
-message, clientAddress = serverSocket.recvfrom(2048)
-# Receive packet from client just to have the return info to reply to the client
 
-modifiedMessage = message.decode().upper()
-# Takes message from client after converting it to a string and uses upper() to capitalize it
+while True:
+    message, clientAddress = serverSocket.recvfrom(2048)
+    # Receive startup packet from client
+    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort, SYN, FIN = parser(message)
+    initialSeqNum = random.randrange(10, 500, 5)
+    print('Binary initialSeqNum =', initialSeqNum)
 
-print(modifiedMessage)  # Print received message to server's command line
+    if SYN == 1:
+        startup_confirmation = ackpack_creator(clientChecksum, initialSeqNum, receivedSeqNum + 1, clientPort, serverPort)
+        ack_loss(ack_loss_rate, startup_confirmation)
+        break
 
-
+while True:
+    estab_conf, clientAddress = serverSocket.recvfrom(2048)
+    MSS = estab_conf[24:]
+    estab_conf = estab_conf[:24]
+    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort, SYN, FIN = parser(estab_conf)
+    if receivedAckNumber == initialSeqNum + 1:
+        break
+    else:
+        ack_loss(ack_loss_rate, startup_confirmation)
 
 start_time = time.time()
 
@@ -201,7 +217,7 @@ while 1:
         # Wait for the packet to come from the client
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
-        SeqNum, clientChecksum, dataPacket, sbitsum, clientPort = parser(recvPacket)
+        receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
         if sbitsum == clientChecksum and SeqNum == SNumber:
@@ -252,7 +268,7 @@ while 1:
         # We've entered the final handshake, wait to receive the last confirmation packet from the sender.
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
-        SeqNum, clientChecksum, dataPacket, sbitsum, ackPacket = parser(recvPacket)
+        receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
         if SeqNum == SNumber:
             # Once the proper packet is received, send back the last ACK and leave
             file.close()
