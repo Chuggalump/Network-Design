@@ -13,6 +13,8 @@ import time
 import _thread
 from Timer_Class import Timer
 import os
+from collections import OrderedDict
+
 
 # Define server name (or IP) and Port#
 from typing import Any, Tuple
@@ -26,14 +28,13 @@ clientPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
 clientSocket = socket(AF_INET, SOCK_DGRAM)
-clientSocket.settimeout(0.05)
 
 # Ask user to enter window size, window size defines number of packets sent at a single time (sliding window if prop ack received)
-N = 20    # int(input('Enter window size for packet transfer: '))
+N = 100    # int(input('Enter window size for packet transfer: '))
 
 # *********************** Ask sender to input simulation Error/Loss during transfer
 # print("Enter Error/Loss below. If no Error/Loss, enter a '0' \n")
-ack_error = 0   # int(input('Enter ACK Error percent for packet transfer: '))
+ack_error = 60   # int(input('Enter ACK Error percent for packet transfer: '))
 data_loss_rate = 0   # int(input('Enter Data Loss percent for packet transfer: '))
 
 # Store selected image into a variable
@@ -47,28 +48,8 @@ file_size = os.stat(FileName).st_size
 initialSeqNum = random.randrange(10, 500, 5)
 print('Binary initialSeqNum =', initialSeqNum)
 
-'''
-# print("\nWaiting for server....................\n")
-
-# *********************** Send client a question to know when files are ready to be sent over
-message = 'Enter File Name to transfer file!'
-# waits for client to input a message and then message is stored in the "message" variable
-
-clientSocket.sendto(message.encode(), (serverName, serverPort))
-# Convert the string message to byte type as we can only send bytes into a socket, done using encode()
-# sendto() attaches destination address to message and sends resulting packet into the process's socket (clientSocket)
-# We didn't need to specify port number of client because we want the system to do it automatically for us
-
-modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
-# Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
-# serverAddress contains both the server's IP and server's port number
-# recvfrom takes the buffer size of 2048 as an input and this size is suitable for most purposes
-
-print(modifiedMessage.decode().upper())
-# Prints the modifiedMessage on user's display once it converts the message from bytes to string but now capitalized
-
 # **************************************************
-'''
+
 # Globals
 receivedSeqNum = 0
 expectedSeqNum = 0
@@ -80,7 +61,6 @@ SYN = 1
 FIN = 0
 ACK_valid = 1
 handshake_flag = True
-
 
 # Mutexes
 base_lock = _thread.allocate_lock()
@@ -97,18 +77,27 @@ bitsum = 0
 # Variable to track which packet in the queue we're on
 nextSeqNum = 0
 # Create an empty dictionary to store the sent but unacked packets
-packet_Queue = {}
-# Create a dictionary to store ACKs
-ack_Queue = {}
+packet_Queue = OrderedDict()
 # Dictionary of timers
 timer_window = {}
-
+handshake_timer = Timer(0.05)
 
 
 def flag_gen(flag):
     global ACK_valid
     global SYN
     global FIN
+
+    '''
+    CWR = 10000000
+    ECE = 010000000
+    Urgent = 00100000
+    ACK_valid = 00010000
+    Push_data = 00001000
+    RST = 00000100
+    SYN = 00000010
+    FIN = 00000001
+    '''
 
     if ACK_valid == 1:
         flag = flag | 0b00010000
@@ -155,16 +144,6 @@ def make_header(csize, file_name, seq_num, client_port, server_port, ack_num):
     head_len = b'\x00'
     flag_byte = 0x00
     flag_byte = flag_gen(flag_byte)
-    '''
-    CWR = 10000000
-    ECE = 010000000
-    Urgent = 00100000
-    ACK_valid = 00010000
-    Push_data = 00001000
-    RST = 00000100
-    SYN = 00000010
-    FIN = 00000001
-    '''
     Rec_window = b'\x00\x00'
     Urg_Data = b'\x00\x00'
     Options = b'\x00\x00\x00\x00'
@@ -273,6 +252,7 @@ def packet_catcher(client_socket):
     global handshake_flag
     global receivedSeqNum
     global receivedAckNumber
+    global FIN
     # Variable to track the expected Sequence Number we receive from the Server
     expected_seq_num = receivedSeqNum
     expected_ack_num = initialSeqNum + MSS
@@ -288,7 +268,11 @@ def packet_catcher(client_socket):
         NewSeqNum = int.from_bytes(NewSeqNum, byteorder='big')
         NewAckNum = int.from_bytes(NewAckNum, byteorder='big')
 
-        selected_packet = packet_Queue[NewAckNum - MSS]
+        if NewAckNum < (file_size + initialSeqNum):
+            selected_packet = packet_Queue[NewAckNum - MSS]
+        else:
+            test_num = list(packet_Queue.keys())[-1]
+            selected_packet = packet_Queue[test_num]
         segment_size = selected_packet[24:]
         bitsum = selected_packet[16:18]
 
@@ -322,7 +306,7 @@ def packet_catcher(client_socket):
                     print("Timer #", close_timer, "closed!!!!!")
                     print_lock.release()
             else:
-                if timer_window[(NewAckNum - initialSeqNum) % (N * MSS)].running():
+                if NewAckNum < file_size and timer_window[(NewAckNum - initialSeqNum) % (N * MSS)].running():
                     timer_window[(NewAckNum - initialSeqNum) % (N * MSS)].stop()
                     print_lock.acquire()
                     print("Timer #", (NewAckNum - initialSeqNum) % (N * MSS), "closedAAAAA")
@@ -354,6 +338,7 @@ def packet_catcher(client_socket):
                 print_lock.acquire()
                 print("Fast Retransmit, resending", NewAckNum + MSS)
                 print_lock.release()
+                clientSocket.sendto(packet_Queue[NewAckNum], (serverName, server_port))
                 clientSocket.sendto(packet_Queue[NewAckNum + MSS], (serverName, server_port))
                 if timer_window[(NewAckNum - initialSeqNum + MSS) % (N * MSS)].running():
                     timer_window[(NewAckNum - initialSeqNum + MSS) % (N * MSS)].stop()
@@ -381,17 +366,30 @@ def packet_catcher(client_socket):
             print("base =", base)
             print_lock.release()
 
-        if (base - initialSeqNum) > (N * MSS):
-            packet_Queue_lock.acquire()
-            packet_Queue.pop((base - (N * MSS)), None)
-            packet_Queue_lock.release()
+            if (base - initialSeqNum) > (N * MSS):
+                packet_Queue_lock.acquire()
+                packet_Queue.popitem(last=False)
+                packet_Queue_lock.release()
 
         if base >= (file_size + initialSeqNum):
             # Close the file and the thread if the last ACK is received
             handshake_flag = True
+            FIN = 1
             receivedAckNumber = expected_ack_num
             image.close()
             _thread.exit()
+
+
+def timer_check(client_socket, send_message):
+    global SYN
+    while True:
+        if handshake_timer.timeout():
+            client_socket.sendto(send_message, (serverName, serverPort))
+        else:
+            time.sleep(0.001)
+        if SYN == 0:
+            _thread.exit()
+            break
 
 
 # Initial handshake set up
@@ -403,6 +401,9 @@ message, packet = make_header(MSS, image, initialSeqNum, clientPort, serverPort,
 clientSocket.sendto(message, (serverName, serverPort))
 
 while True:
+    handshake_timer.start()
+    _thread.start_new_thread(timer_check, (clientSocket, message,))
+
     modifiedMessage, serverAddress = clientSocket.recvfrom(2048)
     # Packet's data arrives inside of variable modifiedMessage and packet's source address is inside serverAddress variable
     # serverAddress contains both the server's IP and server's port number
@@ -524,9 +525,10 @@ if __name__ == "__main__":
                 length_of_packet = len(length_of_packet[24:])
                 nextSeqNum += length_of_packet
         # We will need to change this to base >= (file_size + initial SeqNum)
-        elif base >= (file_size + initialSeqNum):
+        elif base >= file_size or (FIN == 1 and handshake_flag):
             FIN = 1
             timeout_counter = 0
+            clientSocket.settimeout(0.05)
             final_packet, data_packet = make_header(MSS, image, SeqNum, clientPort, serverPort, receivedAckNumber)
             clientSocket.sendto(final_packet, (serverName, serverPort))
             print_lock.acquire()
@@ -542,10 +544,13 @@ if __name__ == "__main__":
                     if finalSeqNum == receivedAckNumber:
                         # Final ACK must have been lost
                         break
-                    if finalAckNum == SeqNum + 1:
+                    elif finalAckNum == SeqNum + 1:
                         break
                 except timeout:
                     clientSocket.sendto(final_packet, (serverName, serverPort))
+                    timeout_counter += 1
+                    if timeout_counter == 4:
+                        break
             while True:
                 try:
                     ackPacket, trashdata = clientSocket.recvfrom(2048)
@@ -560,7 +565,7 @@ if __name__ == "__main__":
                         break
                 except timeout:
                     timeout_counter += 1
-                    if timeout_counter == 2:
+                    if timeout_counter == 4:
                         break
             break
 
