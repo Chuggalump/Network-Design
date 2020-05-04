@@ -31,16 +31,10 @@ FileName = 'Pic.bmp'    # input('File name followed by ".filetype": ')
 
 # Ask user to input Eror/Loss simulation for packet transfer
 dat_error = 0    # int(input('Enter Data Error percent for packet transfer: '))
-ack_loss_rate = 0    # int(input('Enter ACK Loss percent for packet transfer: '))
-
+ack_loss_rate = 60    # int(input('Enter ACK Loss percent for packet transfer: '))
 
 # print("\nReady to download file ...")
-
 # print("\nWaiting for client to send packets . . . .\n")
-'''
-message2 = "Sender is ready to receive packets . . ."  # tell server that you are ready to receive file transfer
-serverSocket.sendto(message2.encode(), clientAddress)
-'''
 # ***********************
 
 # Globals
@@ -186,16 +180,6 @@ def ackpack_creator(sbit_sum, seq_num, ACK_Number, client_port, server_port):
     head_len = b'\x00'
     flag_byte = 0x00
     flag_byte = flag_gen(flag_byte)
-    '''
-    CWR = 10000000
-    ECE = 010000000
-    Urgent = 00100000
-    ACK_valid = 00010000
-    Push_data = 00001000
-    RST = 00000100
-    SYN = 00000010
-    FIN = 00000001
-    '''
     Rec_window = b'\x00\x00'
     Urg_Data = b'\x00\x00'
     Options = b'\x00\x00\x00\x00'
@@ -204,8 +188,6 @@ def ackpack_creator(sbit_sum, seq_num, ACK_Number, client_port, server_port):
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # Clear the ack_packet
     ack_packet = bytearray()
-###****************************************************************###
-    ##Will Need to change dest_port to source_port at some point##
     for a in server_port:
         ack_packet.append(a)
     for b in client_port:
@@ -241,7 +223,7 @@ while True:
 
     if SYN == 1:
         startup_confirmation = ackpack_creator(clientChecksum, generatedACKNumber, receivedSeqNum, clientPort, serverPort)
-        ack_loss(ack_loss_rate, startup_confirmation)
+        ack_loss(0, startup_confirmation)
         SYN = 0
         break
 
@@ -249,10 +231,12 @@ while True:
     estab_conf, clientAddress = serverSocket.recvfrom(2048)
     estab_conf = estab_conf[:24]
     receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(estab_conf)
+    if SYN == 1:
+        ack_loss(0, startup_confirmation)
     if receivedAckNumber == generatedACKNumber + 1:
         break
     else:
-        ack_loss(ack_loss_rate, startup_confirmation)
+        ack_loss(0, startup_confirmation)
 
 expectedSeqNum = receivedSeqNum
 expectedAckNumber = receivedAckNumber
@@ -280,8 +264,6 @@ while 1:
                 expectedAckNumber += len(received_Queue[expectedAckNumber])
                 print('Updated expectedAckNumber is: ', expectedAckNumber)
                 print('Updated expectedSeqNum is: ', expectedSeqNum)
-                # Clear out old unneeded data in the buffer
-                #received_Queue.pop((expectedSeqNum - 20), None)
 
             send_bitsum = make_checksum(received_Queue[old_expectedAckNumber])
             send_bitsum = send_bitsum.to_bytes(2, byteorder='little')
@@ -324,9 +306,11 @@ while 1:
                 receivedSeqNum += 1
                 last_bitsum = b'\x00\x00'
                 ackpack_ack_num = 0
-                ackPacket = ackpack_creator(last_bitsum, ackpack_ack_num, receivedSeqNum, clientPort, serverPort)
-                ack_loss(ack_loss_rate, ackPacket)
+                finalAckPacket = ackpack_creator(last_bitsum, ackpack_ack_num, receivedSeqNum, clientPort, serverPort)
+                ack_loss(ack_loss_rate, finalAckPacket)
                 break
+            else:
+                ack_loss(ack_loss_rate, ackPacket)
 
         finalPacket = ackpack_creator(last_bitsum, expectedAckNumber, receivedSeqNum, clientPort, serverPort)
         ack_loss(ack_loss_rate, finalPacket)
