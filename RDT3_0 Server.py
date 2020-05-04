@@ -41,19 +41,50 @@ serverSocket.sendto(message2.encode(), clientAddress)
 '''
 # ***********************
 
+# Globals
 MSS = 1024
-SNumber = 0
+expectedSeqNum = 0
+old_expectedAckNumber = 0
+receivedSeqNum = 0
+updatedSeqNum = 0
+receivedAckNumber = 0
+expectedAckNumber = 0
+generatedACKNumber = 0
+currentAckNumber = 0
+SYN = 0
+FIN = 0
+ACK_valid = 0
+final_handshake = False
+
+
 file = open(FileName, 'wb')
 ackPacket = bytearray()
 recvPacket = bytearray()
-final_handshake = False
-# Base of the buffering Dictionary
-base = 0
-old_SNumber = 0
 
 final_packet = 0
 
 received_Queue = {}
+
+
+def flag_gen(flag):
+    global ACK_valid
+    global SYN
+    global FIN
+
+    if ACK_valid == 1:
+        flag = flag | 0b00010000
+    else:
+        flag = flag & 0b11101111
+    if SYN == 1:
+        flag = flag | 0b00000010
+    else:
+        flag = flag & 0b11111101
+    if FIN == 1:
+        flag = flag | 0b00000001
+    else:
+        flag = flag & 0b11111110
+
+    return flag
 
 
 def make_checksum(packet):
@@ -103,11 +134,13 @@ def data_error(data):
 
 
 def parser(rec_pack):
+    global SYN
+    global FIN
+    global ACK_valid
     # Parse data from TCP Segment
     client_port = rec_pack[:2]
     server_port = rec_pack[2:4]
     seq_num = rec_pack[4:8]
-    ack_number = rec_pack[8:12]
     Header_N_unused = rec_pack[12:13]
     Header_Bit_setting = rec_pack[13:14]
     Header_Bit_setting = int.from_bytes(Header_Bit_setting, byteorder='little')
@@ -115,6 +148,7 @@ def parser(rec_pack):
     ECE = (Header_Bit_setting >> 6) & 0x01
     Urgent = (Header_Bit_setting >> 5) & 0x01
     ACK_valid = (Header_Bit_setting >> 4) & 0x01
+    print("ACK_valid =", ACK_valid)
     Push_data = (Header_Bit_setting >> 3) & 0x01
     RST = (Header_Bit_setting >> 2) & 0x01
     SYN = (Header_Bit_setting >> 1) & 0x01
@@ -124,6 +158,11 @@ def parser(rec_pack):
     Urgent_data = rec_pack[18:20]
     Options = rec_pack[20:24]
     data_packet = rec_pack[24:]
+
+    if ACK_valid == 1:
+        ack_number = rec_pack[8:12]
+    else:
+        ack_number = b'\x00\x00\x00\x00'
 
     # Simulate possible data corruption
     data_packet = data_error(data_packet)
@@ -137,12 +176,13 @@ def parser(rec_pack):
     print('Packet received. Received SeqNum is:', seq_num)
     print('Received ack_number is:', ack_number)
 
-    return seq_num, ack_number, client_checksum, data_packet, sbit_sum, client_port, server_port, SYN, FIN
+    return seq_num, ack_number, client_checksum, data_packet, sbit_sum, client_port, server_port
+
 
 def ackpack_creator(sbit_sum, seq_num, ACK_Number, client_port, server_port):
     head_len = b'\x00'
     flag_byte = 0x00
-    flag_byte = flag_byte | 0x10
+    flag_byte = flag_gen(flag_byte)
     '''
     CWR = 10000000
     ECE = 010000000
@@ -191,24 +231,28 @@ def ackpack_creator(sbit_sum, seq_num, ACK_Number, client_port, server_port):
 while True:
     message, clientAddress = serverSocket.recvfrom(2048)
     # Receive startup packet from client
-    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort, SYN, FIN = parser(message)
-    initialSeqNum = random.randrange(10, 500, 5)
-    print('Binary initialSeqNum =', initialSeqNum)
+    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(message)
+    receivedSeqNum += 1
+    generatedACKNumber = random.randrange(10, 500, 5)
+    print('Binary generatedACKNumber =', generatedACKNumber)
 
     if SYN == 1:
-        startup_confirmation = ackpack_creator(clientChecksum, initialSeqNum, receivedSeqNum + 1, clientPort, serverPort)
+        startup_confirmation = ackpack_creator(clientChecksum, generatedACKNumber, receivedSeqNum, clientPort, serverPort)
         ack_loss(ack_loss_rate, startup_confirmation)
+        SYN = 0
         break
 
 while True:
     estab_conf, clientAddress = serverSocket.recvfrom(2048)
-    MSS = estab_conf[24:]
     estab_conf = estab_conf[:24]
-    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort, SYN, FIN = parser(estab_conf)
-    if receivedAckNumber == initialSeqNum + 1:
+    receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(estab_conf)
+    if receivedAckNumber == generatedACKNumber + 1:
         break
     else:
         ack_loss(ack_loss_rate, startup_confirmation)
+
+expectedSeqNum = receivedSeqNum
+expectedAckNumber = receivedAckNumber
 
 start_time = time.time()
 
@@ -220,46 +264,48 @@ while 1:
         receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
-        if sbitsum == clientChecksum and SeqNum == SNumber:
+        if sbitsum == clientChecksum and receivedSeqNum == expectedSeqNum and receivedAckNumber == expectedAckNumber:
             # SeqNum is correct, buffer data to the Queue
-            received_Queue[SeqNum] = dataPacket
+            received_Queue[receivedAckNumber] = dataPacket
 
             # Download the data for all in order packets
-            while SNumber in received_Queue:
-                file.write(received_Queue[SNumber])
-                print("Segment #", SNumber, "Downloaded")
+            while expectedAckNumber in received_Queue:
+                file.write(received_Queue[expectedAckNumber])
+                print("Segment #", expectedAckNumber, "Downloaded")
     ########## Pay attention once we start changing header size ##########
-                old_SNumber = SNumber
-                SNumber += len(received_Queue[SNumber])
-                print('Updated SNumber is: ', SNumber)
+                old_expectedAckNumber = expectedAckNumber
+                expectedSeqNum += len(received_Queue[expectedAckNumber])
+                expectedAckNumber += len(received_Queue[expectedAckNumber])
+                print('Updated expectedAckNumber is: ', expectedAckNumber)
+                print('Updated expectedSeqNum is: ', expectedSeqNum)
                 # Clear out old unneeded data in the buffer
-                #received_Queue.pop((SNumber - 20), None)
+                #received_Queue.pop((expectedSeqNum - 20), None)
 
-            send_bitsum = make_checksum(received_Queue[old_SNumber])
+            send_bitsum = make_checksum(received_Queue[old_expectedAckNumber])
             send_bitsum = send_bitsum.to_bytes(2, byteorder='little')
             print("send_bitsum =", send_bitsum)
             # Make the ACK Segment
-            ackPacket = ackpack_creator(send_bitsum, old_SNumber, serverPort, clientPort)
+            ackPacket = ackpack_creator(send_bitsum, old_expectedAckNumber, expectedSeqNum, clientPort, serverPort)
             # Send the ACK Segment back to sender, calculating if there's loss or not
             ack_loss(ack_loss_rate, ackPacket)
 
             # If last packet
-            if len(dataPacket) < 1024:
-                final_packet = SNumber
+            if len(dataPacket) < MSS:
+                final_packet = expectedAckNumber
 
-            # If final_packet flag is = to SNumber, we're really on the final packet. Trigger the final handshake
-            if final_packet == SNumber:
+            # If final_packet flag is = to expectedSeqNum, we're really on the final packet. Trigger the final handshake
+            if final_packet == expectedAckNumber:
                 final_handshake = True
 
         # If packet is good but out of order
-        elif sbitsum == clientChecksum and SeqNum > SNumber:
+        elif sbitsum == clientChecksum and receivedSeqNum > expectedSeqNum and receivedAckNumber > expectedAckNumber:
             # Send the ACK packet back to sender, calculating if there's loss or not
             ack_loss(ack_loss_rate, ackPacket)
             # SeqNum is out of order but still good, buffer data to the Queue
-            received_Queue[SeqNum] = dataPacket
+            received_Queue[receivedAckNumber] = dataPacket
             # If last packet, close the file
-            if len(dataPacket) < 1024:
-                final_packet = SeqNum + len(dataPacket)
+            if len(dataPacket) < MSS:
+                final_packet = receivedAckNumber + len(dataPacket)
         else:
             # Checksum fail, drop packet and do nothing
             pass
@@ -269,7 +315,7 @@ while 1:
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
         receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
-        if SeqNum == SNumber:
+        if receivedSeqNum == expectedSeqNum:
             # Once the proper packet is received, send back the last ACK and leave
             file.close()
             break
