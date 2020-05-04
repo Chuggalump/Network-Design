@@ -9,6 +9,8 @@ from socket import *
 import array
 import random
 import time
+import _thread
+from Timer_Class import Timer
 
 # Wait for server to define server Port#
 serverPort = 12000
@@ -56,6 +58,7 @@ FIN = 0
 ACK_valid = 0
 final_handshake = False
 
+receive_timer = Timer(0.5)
 
 file = open(FileName, 'wb')
 ackPacket = bytearray()
@@ -260,7 +263,6 @@ while 1:
     if not final_handshake:
         # Wait for the packet to come from the client
         recvPacket, clientAddress = serverSocket.recvfrom(2048)
-
         receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
 
         # If checksums the same and SeqNum is what we expect, everything is right with the world
@@ -311,19 +313,36 @@ while 1:
             pass
     else:
         print("Final Countdown")
+        timeout_counter = 0
         # We've entered the final handshake, wait to receive the last confirmation packet from the sender.
-        recvPacket, clientAddress = serverSocket.recvfrom(2048)
+        while True:
+            recvPacket, clientAddress = serverSocket.recvfrom(2048)
 
-        receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
-        if receivedSeqNum == expectedSeqNum:
-            # Once the proper packet is received, send back the last ACK and leave
-            file.close()
-            break
-        else:
-            # If we get back something other than the final packet, send back an ACK with that sequence number
-            # until we get the packet we're looking for
-            ack_loss(ack_loss_rate, ackPacket)
+            receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
+            if receivedSeqNum == expectedSeqNum:
+                # Once the proper packet is received
+                receivedSeqNum += 1
+                last_bitsum = b'\x00\x00'
+                ackpack_ack_num = 0
+                ackPacket = ackpack_creator(last_bitsum, ackpack_ack_num, receivedSeqNum, clientPort, serverPort)
+                ack_loss(ack_loss_rate, ackPacket)
+                break
 
+        finalPacket = ackpack_creator(last_bitsum, expectedAckNumber, receivedSeqNum, clientPort, serverPort)
+        ack_loss(ack_loss_rate, finalPacket)
+        serverSocket.settimeout(0.05)
+        while True:
+            try:
+                recvPacket, clientAddress = serverSocket.recvfrom(2048)
+                receivedSeqNum, receivedAckNumber, clientChecksum, dataPacket, sbitsum, clientPort, serverPort = parser(recvPacket)
+                if receivedAckNumber == expectedAckNumber + 1:
+                    break
+            except timeout:
+                timeout_counter += 1
+                if timeout_counter == 2:
+                    break
+        file.close()
+        break
 
 end_time = start_time
 print("Total time for completion was %s" % (time.time() - start_time))
