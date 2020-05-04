@@ -26,6 +26,7 @@ clientPort = 12000
 
 # Create the client socket. First parameter indicates IPv4, second param indicates UDP
 clientSocket = socket(AF_INET, SOCK_DGRAM)
+clientSocket.settimeout(0.05)
 
 # Ask user to enter window size, window size defines number of packets sent at a single time (sliding window if prop ack received)
 N = 20    # int(input('Enter window size for packet transfer: '))
@@ -78,8 +79,6 @@ expectedAckNumber = 0
 SYN = 1
 FIN = 0
 ACK_valid = 1
-final_flag = False
-handshake_set_fin = True
 handshake_flag = True
 
 
@@ -103,8 +102,7 @@ packet_Queue = {}
 ack_Queue = {}
 # Dictionary of timers
 timer_window = {}
-# Instantiate Timer
-ack_timer = Timer(0.05)
+
 
 
 def flag_gen(flag):
@@ -128,7 +126,27 @@ def flag_gen(flag):
     return flag
 
 
-def header_maker(seq_num, bit_sum, client_port, server_port, ack_num):
+def make_header(csize, file_name, seq_num, client_port, server_port, ack_num):
+    global handshake_flag
+    global FIN
+    global SYN
+    packet = 0
+    bit_sum = b'\x00\x00'
+    if not handshake_flag:
+        if SYN != 1 and FIN != 1:
+            packet = file_name.read(csize)
+
+            # Make the checksum and convert it to bytes so it can be appended to the packet
+            if len(packet) % 2 != 0:
+                packet += b'\0'
+
+            res = sum(array.array("H", packet))
+            res = (res >> 16) + (res & 0xffff)
+            res += res >> 16
+
+            checksum = (~res) & 0xffff
+            bit_sum = checksum.to_bytes(2, byteorder='little')
+
     seq_num = seq_num.to_bytes(4, byteorder='big')
     # print("Seq Num of packet is:", seq_num)
     client_port = client_port.to_bytes(2, byteorder='little')
@@ -172,53 +190,6 @@ def header_maker(seq_num, bit_sum, client_port, server_port, ack_num):
     for j in Options:
         header_packet.append(j)
 
-    return header_packet
-
-
-def make_header(csize, file_name, seq_num, client_port, server_port, ack_num):
-    global final_flag
-    global handshake_set_fin
-    global FIN
-    global SYN
-    global start_flag
-    packet = 0
-    end = 0
-    bit_sum = b'\x00\x00'
-    if not handshake_flag:
-        if SYN != 1 and FIN != 1:
-            pass_count = 0
-            print("pass_count =", pass_count)
-            packet = file_name.read(csize)
-
-            # Make the checksum and convert it to bytes so it can be appended to the packet
-            if len(packet) % 2 != 0:
-                packet += b'\0'
-
-            res = sum(array.array("H", packet))
-            res = (res >> 16) + (res & 0xffff)
-            res += res >> 16
-
-            checksum = (~res) & 0xffff
-            bit_sum = checksum.to_bytes(2, byteorder='little')
-    else:
-        bit_sum = b'\x00\x00'
-        handshake_set_fin = True
-        end = 1
-
-    header_packet = header_maker(seq_num, bit_sum, client_port, server_port, ack_num)
-    '''
-    # if handshake true and segment is at the end
-    elif handshake_set_fin and end == 1:
-        FIN = 1
-        header_packet = header_maker(seq_num, bit_sum, client_port, server_port, ack_num)
-
-    # if handshake true and we are initializing communication with receiver
-    else:
-        SYN = 1
-        header_packet = header_maker(seq_num, bit_sum, client_port, server_port, ack_num)
-        handshake_set_fin = False
-    '''
-
     # print("header_packet =", header_packet)
     return header_packet, packet
 
@@ -227,9 +198,7 @@ def make_header(csize, file_name, seq_num, client_port, server_port, ack_num):
 def make_packet(csize, file_name, seq_num, ack_numb):
     global clientPort
     global serverPort
-    #csize, file_name, seq_num, client_port, server_port, ack_numb
     send_packet, data_packet = make_header(csize, file_name, seq_num, clientPort, serverPort, ack_numb)
-    #print("data_packet =", data_packet)
     if data_packet != 0:
         for k in data_packet:
             send_packet.append(k)
@@ -298,10 +267,12 @@ def parser(rec_pack):
 
     return seq_num, ack_number, data_packet, server_checksum, client_port, server_port
 
+
 def packet_catcher(client_socket):
     global base
-    global final_flag
+    global handshake_flag
     global receivedSeqNum
+    global receivedAckNumber
     # Variable to track the expected Sequence Number we receive from the Server
     expected_seq_num = receivedSeqNum
     expected_ack_num = initialSeqNum + MSS
@@ -309,13 +280,6 @@ def packet_catcher(client_socket):
     temp_ack_num = 0
     while 1:
         # Try to receive the ACK packet from server. If not received in 50ms, timeout and resend the packet
-
-        if ack_timer.timeout():
-            expected_seq_num = base
-            print_lock.acquire()
-            print("expected seq num is now:", expected_seq_num)
-            print_lock.release()
-
         # trasdata is the address sent with the ACK. We don't need it
         ackPacket, trashdata = client_socket.recvfrom(2048)
 
@@ -424,7 +388,8 @@ def packet_catcher(client_socket):
 
         if base >= (file_size + initialSeqNum):
             # Close the file and the thread if the last ACK is received
-            final_flag = True
+            handshake_flag = True
+            receivedAckNumber = expected_ack_num
             image.close()
             _thread.exit()
 
@@ -560,46 +525,43 @@ if __name__ == "__main__":
                 nextSeqNum += length_of_packet
         # We will need to change this to base >= (file_size + initial SeqNum)
         elif base >= (file_size + initialSeqNum):
-            '''
-            send packet with SeqNum x, FIN = 1, ACK valid = 0
-            final_seg_timer = Timer(0.05)
-            final_ACK_timer = Timer(0.1)
-            while True:
-                wait for closing ACK, don't close the packet_catcher thread yet
-                if closing ACK received:
-                    break
-                elif final_seg_timer.timeout():
-                    resend final segment
-                else:
-                    time.sleep(0.001)
-            while True:
-                Wait for the closing segment from the serer
-                if closing segment received:
-                    ACK valid = 1
-                    send final ACK
-                    break
-                else:
-                    time.sleep(0.001)
-            while True:
-                final_timer.start()
-                if closing segment re-received:
-                    resend final ACK
-                elif final_timer.timeout():
-                    break
-                else:
-                    time.sleep(0.001)  
-            '''
-            # At the end of the file, start the final handshake process
-            '''********************************************
-            This make_header call probably has the wrong variables
-            **************************************************'''
-            handshake_flag = True
             FIN = 1
+            timeout_counter = 0
             final_packet, data_packet = make_header(MSS, image, SeqNum, clientPort, serverPort, receivedAckNumber)
             clientSocket.sendto(final_packet, (serverName, serverPort))
             print_lock.acquire()
-            print("Final packet sent")
+            print("Final segment sent")
             print_lock.release()
+            while True:
+                try:
+                    ackPacket, trashdata = clientSocket.recvfrom(2048)
+                    print("final ack received")
+                    finalSeqNum, finalAckNum, data_packet, serverChecksum, client_port, server_port = parser(ackPacket)
+                    finalSeqNum = int.from_bytes(finalSeqNum, byteorder='big')
+                    finalAckNum = int.from_bytes(finalAckNum, byteorder='big')
+                    if finalSeqNum == receivedAckNumber:
+                        # Final ACK must have been lost
+                        break
+                    if finalAckNum == SeqNum + 1:
+                        break
+                except timeout:
+                    clientSocket.sendto(final_packet, (serverName, serverPort))
+            while True:
+                try:
+                    ackPacket, trashdata = clientSocket.recvfrom(2048)
+                    print("sending last ack")
+                    finalSegSeqNum, finalSegAckNum, data_packet, serverChecksum, client_port, server_port = parser(ackPacket)
+                    finalSegSeqNum = int.from_bytes(finalSegSeqNum, byteorder='big')
+                    finalSegAckNum = int.from_bytes(finalSegAckNum, byteorder='big')
+                    if finalSegSeqNum == receivedAckNumber:
+                        finalSegSeqNum += 1
+                        final_packet, data_packet = make_header(MSS, image, SeqNum, clientPort, serverPort, finalSegSeqNum)
+                        clientSocket.sendto(final_packet, (serverName, serverPort))
+                        break
+                except timeout:
+                    timeout_counter += 1
+                    if timeout_counter == 2:
+                        break
             break
 
 
